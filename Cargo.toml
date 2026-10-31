@@ -6,7 +6,7 @@ description = "Windows memory analysis and management tool"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["memory", "windows", "working-set", "pagefile"]
-categories = ["command-line-utilities"]
+categories = ["gui"]
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_SystemInformation"] }
@@ -17,7 +17,9 @@ codegen-units = 1
 strip = true
 
 [dependencies]
-eframe = { version = "0.37.0", features = ["persistence"] }
+# OpenGL renderer instead of the default wgpu: much lower memory footprint.
+# System fonts are loaded selectively in theme.rs, so `system_fonts` is off.
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "persistence"] }
 egui_extras = "0.37.0"
 egui_plot = "0.38.0"
 rust-i18n = "4.2.4"

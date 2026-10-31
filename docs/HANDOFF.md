@@ -6,8 +6,8 @@
 
 ## 1. 專案概要
 
-Windows 記憶體儀表板（Rust + egui）。目前為**唯讀**：只讀取記憶體資訊，不修改、暫停或結束任何程序。
-長期目標是在不關閉程式的前提下，讓系統優先回收閒置程式的記憶體。
+Windows 記憶體儀表板（Rust + egui）。可以找出閒置的應用程式，並在使用者觸發時降低它們的記憶體優先權，
+讓 Windows 在記憶體不足時優先回收；不會暫停或結束任何程序，所有變更都可還原。
 
 ## 2. 環境
 
@@ -52,6 +52,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `src/process.rs` | 程序層級原始資料：Toolhelp 列舉、記憶體、CPU 時間、I/O、Session、Chromium `--type=` 偵測、前景程序 |
 | `src/classify.rs` | 依執行檔名分組成「應用程式」、WebView2 歸屬到擁有者、分類（系統／安全／虛擬機／服務／瀏覽器／Web 技術／一般） |
 | `src/activity.rs` | 跨取樣追蹤 CPU、I/O、前景，判定使用中／不活躍／閒置 |
+| `src/priority.rs` | `Governor`：降低／還原記憶體優先權、自動還原、當機還原紀錄檔（M4） |
 | `src/theme.rs` | 深色主題配色、依語言載入 Windows 系統字型 |
 | `src/i18n.rs` | 語言列舉、偵測 Windows 顯示語言 |
 | `locales/*.yml` | 介面文字（每語言一檔，缺字回退英文） |
@@ -59,13 +60,17 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 
 ## 5. 開發慣例
 
-- **唯讀界線**：M4 之前，開啟程序控制代碼只能用 `PROCESS_QUERY_LIMITED_INFORMATION`。
+- **寫入界線**：會改變其他程序的操作只能放在 `priority.rs`（M5 起另加專屬模組），只能由使用者觸發，
+  而且必須可以還原。其他模組開啟程序只能用 `PROCESS_QUERY_LIMITED_INFORMATION`。
+  `Governor` 由 UI 與取樣執行緒共用（`Arc<Mutex<_>>`）；UI 的操作先收集成 `Action`，畫面繪製完再套用。
 - **i18n**：使用者看得到的字串一律加入四個 `locales/*.yml`，用 `t!("key", name = value)`。
   鍵名用「區塊.項目」（例如 `kpi.commit.title`）。
 - **隱私**：
   - 程序命令列只在記憶體中解析必要旗標（例如 Chromium 的 `--type=`），不得顯示、記錄或寫入檔案。
   - 截圖會含本機程序名稱，不要提交到 repo（`/screenshots/` 已被忽略）。
   - 程式不得連網。
+  - 本機只寫入兩個檔案：UI 設定（`%APPDATA%\memwarden`，由 eframe 管理）與還原紀錄檔
+    （`%LOCALAPPDATA%\memwarden\lowered-priorities.txt`，只有數字，沒有降低任何程式時會刪除）。
 - **平台程式碼**：Windows API 呼叫集中在 `system.rs`、`process.rs`（及 M3 新增模組），UI 不直接呼叫 Win32。
 - **字型**：不打包字型檔，執行時讀取 `C:\Windows\Fonts`。
 - **自身占用**：新增功能後用發佈版量測 memwarden 的私有記憶體，目標 < 160 MB。

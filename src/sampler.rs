@@ -1,6 +1,7 @@
 //! Background sampling thread, so slow process enumeration never blocks the UI.
 
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -8,6 +9,7 @@ use eframe::egui;
 
 use crate::activity::Tracker;
 use crate::classify::{self, AppUsage};
+use crate::priority::Governor;
 use crate::process::{self, Collector};
 use crate::system::{self, SystemMemory};
 
@@ -19,7 +21,7 @@ pub struct Snapshot {
 }
 
 /// Starts sampling every `interval`; the UI is woken after each new snapshot.
-pub fn spawn(ctx: egui::Context, interval: Duration) -> Receiver<Snapshot> {
+pub fn spawn(ctx: egui::Context, interval: Duration, governor: Arc<Mutex<Governor>>) -> Receiver<Snapshot> {
     let (tx, rx) = mpsc::channel();
     thread::Builder::new()
         .name("sampler".into())
@@ -31,6 +33,7 @@ pub fn spawn(ctx: egui::Context, interval: Duration) -> Receiver<Snapshot> {
                     let now = Instant::now();
                     let (mut apps, denied) = classify::group(&procs);
                     tracker.update(&procs, &mut apps, process::foreground_pid(), now);
+                    governor.lock().unwrap_or_else(|e| e.into_inner()).sync(&mut apps);
                     let snap = Snapshot { taken: now, sys, apps, denied };
                     if tx.send(snap).is_err() {
                         break; // UI closed

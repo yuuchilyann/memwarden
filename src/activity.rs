@@ -113,9 +113,9 @@ impl Tracker {
         let mut seen = HashSet::with_capacity(apps.len());
         for app in apps.iter_mut() {
             let (cpu, io) = app
-                .pids
+                .instances
                 .iter()
-                .filter_map(|pid| deltas.get(pid))
+                .filter_map(|(pid, _)| deltas.get(pid))
                 .fold((0u64, 0u64), |acc, d| (acc.0 + d.0, acc.1 + d.1));
             // Displayed CPU is the latest interval, as a share of all cores like Task Manager.
             let pct_of_core = if secs > 0.0 { cpu as f64 / 1e7 / secs * 100.0 } else { 0.0 };
@@ -124,7 +124,7 @@ impl Tracker {
             let key = app.name.to_lowercase();
             let state = self.apps.entry(key.clone()).or_insert_with(|| AppState::new(now));
             let (avg_cpu, avg_io) = state.push(now, cpu, io);
-            let active = foreground.is_some_and(|pid| app.pids.contains(&pid))
+            let active = foreground.is_some_and(|fg| app.instances.iter().any(|&(pid, _)| pid == fg))
                 || avg_cpu >= ACTIVE_CPU_PCT_OF_CORE
                 || avg_io >= ACTIVE_IO_BYTES_PER_SEC;
             if active {
@@ -160,9 +160,10 @@ mod tests {
             count: pids.len(),
             private: 0,
             working_set: 0,
-            pids: pids.to_vec(),
+            instances: pids.iter().map(|&pid| (pid, 1)).collect(),
             cpu_pct: 0.0,
             status: Status::Active,
+            lowered: false,
         }
     }
 

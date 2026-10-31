@@ -2,8 +2,9 @@
 
 Windows memory dashboard written in Rust.
 
-> Status: early prototype. The current version is **read-only**: it reports
-> memory usage and never modifies, suspends or terminates any process.
+> Status: early prototype. memwarden never suspends or terminates processes.
+> The only change it can make is lowering the memory priority of idle apps,
+> and only when you ask; every change is restored automatically.
 
 ## Features (current)
 
@@ -13,14 +14,18 @@ Windows memory dashboard written in Rust.
 - 10-minute usage history chart
 - Per-application memory (private bytes / working set), grouped by executable
   so multi-process apps such as Chrome or Electron show as one line, with filter
+- Idle detection: apps unused for 5 minutes, grouped and classified
+  (browsers, web-based apps, services, VMs, system, security)
+- Lower memory priority of idle apps, per app or all at once. Windows then
+  reclaims their memory first when RAM runs low. Priority is restored when the
+  app is used again, on request, when memwarden exits, or after a crash on the
+  next start. Note: this does not reduce commit charge.
 - UI languages: 繁體中文, English, 日本語, 한국어
 
 ## Roadmap
 
-1. Idle-process detection and classification (browsers, Electron/WebView2, VMs)
-2. Lowering memory priority of idle processes (`ProcessMemoryPriority`)
-3. Optional working-set trimming for long-idle background apps
-4. Browser companion extension for tab-level analysis and tab discarding
+1. Optional working-set trimming for long-idle background apps
+2. Browser companion extension for tab-level analysis and tab discarding
 
 ## Build
 
@@ -57,7 +62,9 @@ made in the language picker is remembered.
 
 - memwarden makes no network connections.
 - It stores only UI settings (language, window layout) under
-  `%APPDATA%\memwarden`.
+  `%APPDATA%\memwarden`, and while priorities are lowered, a recovery file of
+  numbers only (PID, start time, original priority) under
+  `%LOCALAPPDATA%\memwarden`.
 - Its display can include process names of the machine it runs on. Review
   screenshots before attaching them to public issues. Generated reports
   (`reports/`, `snapshots/`, `*.dmp`) are excluded by `.gitignore`.

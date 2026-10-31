@@ -81,10 +81,13 @@ pub struct AppUsage {
     pub count: usize,
     pub private: u64,
     pub working_set: u64,
-    pub pids: Vec<u32>,
+    /// Process instances as `(pid, start time)`.
+    pub instances: Vec<(u32, u64)>,
     /// Share of total CPU capacity, as in Task Manager. Set by the activity tracker.
     pub cpu_pct: f32,
     pub status: Status,
+    /// Memory priority lowered by memwarden. Set by the priority governor.
+    pub lowered: bool,
 }
 
 struct Group {
@@ -114,9 +117,10 @@ pub fn group(procs: &[ProcessInfo]) -> (Vec<AppUsage>, usize) {
                 count: 0,
                 private: 0,
                 working_set: 0,
-                pids: Vec::new(),
+                instances: Vec::new(),
                 cpu_pct: 0.0,
                 status: Status::Active,
+                lowered: false,
             },
             web_engine: false,
             all_services: true,
@@ -124,7 +128,7 @@ pub fn group(procs: &[ProcessInfo]) -> (Vec<AppUsage>, usize) {
         g.app.count += 1;
         g.app.private += stats.private;
         g.app.working_set += stats.working_set;
-        g.app.pids.push(p.pid);
+        g.app.instances.push((p.pid, stats.created));
         g.web_engine |= stats.chromium_child || via_webview2;
         g.all_services &= p.session == Some(0);
     }

@@ -2,6 +2,7 @@
 
 use std::collections::VecDeque;
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
@@ -12,6 +13,7 @@ use rust_i18n::t;
 use crate::activity::Status;
 use crate::classify::{AppUsage, Category};
 use crate::i18n::Lang;
+use crate::priority::Governor;
 use crate::sampler::{self, Snapshot};
 use crate::theme::{
     self, AMBER, BLUE, CARD, CARD_BORDER, CRITICAL_PCT, CYAN, GREEN, MUTED, RED, SLATE, TRACK, VIOLET,
@@ -35,6 +37,22 @@ pub struct App {
     history: VecDeque<[f64; 3]>,
     filter: Filter,
     lang: Lang,
+    governor: Arc<Mutex<Governor>>,
+    /// The "lower all idle" button is waiting for confirmation.
+    confirm_bulk: bool,
+}
+
+/// User actions on memory priority, applied after the frame is drawn.
+enum Action {
+    Lower(String),
+    Restore(String),
+    LowerAllIdle,
+    RestoreAll,
+}
+
+fn lock(governor: &Mutex<Governor>) -> MutexGuard<'_, Governor> {
+    // A panic elsewhere must not prevent restoring priorities.
+    governor.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Row filter of the applications table.
@@ -68,13 +86,16 @@ impl App {
         lang.activate();
         theme::apply(&cc.egui_ctx);
         theme::set_fonts(&cc.egui_ctx, lang);
+        let governor = Arc::new(Mutex::new(Governor::new()));
         Self {
-            rx: sampler::spawn(cc.egui_ctx.clone(), SAMPLE_INTERVAL),
+            rx: sampler::spawn(cc.egui_ctx.clone(), SAMPLE_INTERVAL, governor.clone()),
             latest: None,
             started: Instant::now(),
             history: VecDeque::with_capacity(HISTORY_LEN + 1),
             filter: Filter::default(),
             lang,
+            governor,
+            confirm_bulk: false,
         }
     }
 
@@ -88,6 +109,35 @@ impl App {
             self.latest = Some(snap);
         }
     }
+
+    fn apply(&mut self, actions: Vec<Action>) {
+        let Some(snap) = self.latest.as_mut() else { return };
+        let mut gov = lock(&self.governor);
+        for action in actions {
+            match action {
+                Action::Lower(name) => {
+                    if let Some(app) = snap.apps.iter().find(|a| a.name == name) {
+                        gov.lower(app);
+                    }
+                }
+                Action::Restore(name) => gov.restore(&name),
+                Action::LowerAllIdle => {
+                    let failed: usize = snap
+                        .apps
+                        .iter()
+                        .filter(|a| is_idle_candidate(a) && !a.lowered)
+                        .map(|a| gov.lower(a))
+                        .sum();
+                    gov.failed = failed;
+                }
+                Action::RestoreAll => gov.restore_all(),
+            }
+        }
+        // Show the change now instead of waiting for the next sample.
+        for app in &mut snap.apps {
+            app.lowered = gov.is_lowered(&app.name);
+        }
+    }
 }
 
 impl eframe::App for App {
@@ -96,12 +146,16 @@ impl eframe::App for App {
         // Keeps the "updated N s ago" label ticking between samples.
         ui.ctx().request_repaint_after(Duration::from_secs(1));
 
-        let Self { latest, history, filter, started, lang, .. } = self;
+        let (lowered, failed) = {
+            let gov = lock(&self.governor);
+            (gov.lowered_count(), gov.failed)
+        };
+        let Self { latest, history, filter, started, lang, confirm_bulk, .. } = self;
 
         let picked = egui::Panel::top("header")
             .frame(Frame::new().fill(theme::BG).inner_margin(Margin::symmetric(20, 14)))
             .show_separator_line(false)
-            .show(ui, |ui| header(ui, latest.as_ref(), *lang))
+            .show(ui, |ui| header(ui, latest.as_ref(), *lang, lowered))
             .inner;
         if let Some(new_lang) = picked {
             *lang = new_lang;
@@ -109,6 +163,7 @@ impl eframe::App for App {
             theme::set_fonts(ui.ctx(), new_lang);
         }
 
+        let mut actions = Vec::new();
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BG).inner_margin(Margin { left: 20, right: 20, top: 0, bottom: 18 }))
             .show(ui, |ui| {
@@ -129,8 +184,15 @@ impl eframe::App for App {
                             strip.cell(|ui| top_card(ui, &snap.apps));
                         });
                 });
-                apps_card(ui, snap, filter);
+                actions = apps_card(ui, snap, filter, confirm_bulk, (lowered, failed));
             });
+        if !actions.is_empty() {
+            self.apply(actions);
+        }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        lock(&self.governor).restore_all();
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -178,7 +240,7 @@ fn fmt_bytes(bytes: u64) -> String {
 // ---------- sections ----------
 
 /// Returns the newly picked language, if the user changed it.
-fn header(ui: &mut Ui, latest: Option<&Snapshot>, lang: Lang) -> Option<Lang> {
+fn header(ui: &mut Ui, latest: Option<&Snapshot>, lang: Lang, lowered: usize) -> Option<Lang> {
     let mut picked = lang;
     ui.horizontal(|ui| {
         ui.label(RichText::new("memwarden").size(22.0).strong());
@@ -193,7 +255,11 @@ fn header(ui: &mut Ui, latest: Option<&Snapshot>, lang: Lang) -> Option<Lang> {
                     }
                 });
             ui.add_space(8.0);
-            ui.label(RichText::new(t!("status.read_only")).size(12.0).color(MUTED));
+            if lowered > 0 {
+                ui.label(RichText::new(t!("status.lowered", count = lowered)).size(12.0).color(AMBER));
+            } else {
+                ui.label(RichText::new(t!("status.read_only")).size(12.0).color(MUTED));
+            }
             ui.label(RichText::new("·").color(MUTED));
             match latest {
                 Some(s) => {
@@ -348,20 +414,31 @@ fn status_text(app: &AppUsage) -> RichText {
     if !app.category.idle_candidate() {
         return RichText::new("—").color(MUTED);
     }
-    match app.status {
-        Status::Active => RichText::new(t!("activity.active")).color(GREEN),
-        Status::Inactive => RichText::new(t!("activity.inactive")).color(MUTED),
-        Status::Idle(quiet) => RichText::new(t!("activity.idle", min = quiet.as_secs() / 60)).color(AMBER),
-    }
+    let (text, color) = match app.status {
+        Status::Active => (t!("activity.active"), GREEN),
+        Status::Inactive => (t!("activity.inactive"), MUTED),
+        Status::Idle(quiet) => (t!("activity.idle", min = quiet.as_secs() / 60), AMBER),
+    };
+    // An arrow marks apps whose memory priority memwarden lowered.
+    if app.lowered { RichText::new(format!("↓ {text}")).color(VIOLET) } else { RichText::new(text).color(color) }
 }
 
-fn apps_card(ui: &mut Ui, snap: &Snapshot, filter: &mut Filter) {
+/// `priority` is `(lowered app count, processes that failed in the last action)`.
+fn apps_card(
+    ui: &mut Ui,
+    snap: &Snapshot,
+    filter: &mut Filter,
+    confirm_bulk: &mut bool,
+    priority: (usize, usize),
+) -> Vec<Action> {
+    let mut actions = Vec::new();
     card(ui, true, |ui| {
         let (idle_count, idle_bytes) = snap
             .apps
             .iter()
             .filter(|a| is_idle_candidate(a))
             .fold((0usize, 0u64), |acc, a| (acc.0 + 1, acc.1 + a.private));
+        let (lowered, failed) = priority;
 
         ui.horizontal(|ui| {
             card_title(ui, &t!("apps.title"));
@@ -388,6 +465,31 @@ fn apps_card(ui: &mut Ui, snap: &Snapshot, filter: &mut Filter) {
                     }
                 });
             ui.checkbox(&mut filter.idle_only, t!("apps.idle_only"));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if *confirm_bulk {
+                    if ui.button(t!("priority.cancel")).clicked() {
+                        *confirm_bulk = false;
+                    }
+                    if ui.button(RichText::new(t!("priority.confirm_yes")).color(AMBER)).clicked() {
+                        actions.push(Action::LowerAllIdle);
+                        *confirm_bulk = false;
+                    }
+                    ui.label(t!("priority.confirm", count = idle_count, size = fmt_bytes(idle_bytes)));
+                    return;
+                }
+                if lowered > 0 && ui.button(t!("priority.restore_all", count = lowered)).clicked() {
+                    actions.push(Action::RestoreAll);
+                }
+                let bulk = ui
+                    .add_enabled(idle_count > 0, egui::Button::new(t!("priority.lower_all", count = idle_count)))
+                    .on_hover_text(t!("priority.explain"));
+                if bulk.clicked() {
+                    *confirm_bulk = true;
+                }
+                if failed > 0 {
+                    ui.label(RichText::new(t!("priority.failed", count = failed)).size(12.0).color(MUTED));
+                }
+            });
         });
 
         let needle = filter.text.to_lowercase();
@@ -403,14 +505,15 @@ fn apps_card(ui: &mut Ui, snap: &Snapshot, filter: &mut Filter) {
             .striped(true)
             .auto_shrink([false, false])
             .cell_layout(Layout::left_to_right(Align::Center))
-            .column(Column::remainder().at_least(160.0))
-            .column(Column::exact(150.0))
-            .column(Column::exact(80.0))
+            .column(Column::remainder().at_least(140.0))
+            .column(Column::exact(140.0))
             .column(Column::exact(70.0))
+            .column(Column::exact(64.0))
+            .column(Column::exact(96.0))
             .column(Column::exact(100.0))
-            .column(Column::exact(110.0))
-            .column(Column::exact(120.0))
-            .column(Column::exact(170.0))
+            .column(Column::exact(124.0))
+            .column(Column::exact(130.0))
+            .column(Column::exact(140.0))
             .header(26.0, |mut h| {
                 for (key, align_right) in [
                     ("col.name", false),
@@ -434,6 +537,9 @@ fn apps_card(ui: &mut Ui, snap: &Snapshot, filter: &mut Filter) {
                     ui.label(RichText::new(t!("col.status")).color(MUTED));
                 });
                 h.col(|ui| {
+                    ui.label(RichText::new(t!("col.action")).color(MUTED));
+                });
+                h.col(|ui| {
                     ui.label(RichText::new(t!("col.share")).color(MUTED));
                 });
             })
@@ -453,6 +559,18 @@ fn apps_card(ui: &mut Ui, snap: &Snapshot, filter: &mut Filter) {
                         ui.label(status_text(a));
                     });
                     row.col(|ui| {
+                        if a.lowered {
+                            if ui.small_button(t!("priority.restore")).clicked() {
+                                actions.push(Action::Restore(a.name.clone()));
+                            }
+                        } else if a.category.idle_candidate() && a.status != Status::Active {
+                            let button = ui.small_button(t!("priority.lower")).on_hover_text(t!("priority.explain"));
+                            if button.clicked() {
+                                actions.push(Action::Lower(a.name.clone()));
+                            }
+                        }
+                    });
+                    row.col(|ui| {
                         let share = a.private as f64 / total;
                         ui.label(RichText::new(format!("{:>4.1}%", share * 100.0)).size(12.0).color(MUTED));
                         meter(ui, a.private as f64 / max, BLUE);
@@ -460,5 +578,6 @@ fn apps_card(ui: &mut Ui, snap: &Snapshot, filter: &mut Filter) {
                 });
             });
     });
+    actions
 }
 

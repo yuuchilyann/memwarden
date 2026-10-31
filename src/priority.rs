@@ -232,6 +232,7 @@ mod tests {
             status,
             lowered: false,
             audio: false,
+            growth: None,
         }
     }
 

@@ -4,9 +4,9 @@
 
 開發進度與下一步請見 [PLAN.md](PLAN.md)。
 
-**目前狀態（2026-10-31）**：M0–M5 完成；M6（瀏覽器擴充功能）與 M7（關閉建議、分頁檔資訊）程式完成，
-部分實機驗證待做（PLAN.md 7.10、8.9）。**下一步：M8 記憶體成長追蹤**（規格見 PLAN.md 第 9 節，尚未實作），
-之後是 M9 發佈。
+**目前狀態（2026-10-31）**：M0–M5 完成；M6（瀏覽器擴充功能）、M7（關閉建議、分頁檔資訊）與
+M8（記憶體成長追蹤）程式完成，部分實機驗證待做（PLAN.md 7.10、8.9、9.8；M8 需要開著數小時觀察並調整門檻）。
+**下一步：M9 發佈**。
 
 ## 1. 專案概要
 
@@ -62,6 +62,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
   classify::group(procs) → apps   ├ Snapshot ─mpsc─▶ header / kpi_row / history_card
   Tracker::update(procs, apps,    │                top_card / apps_card（篩選、類別、狀態）
                   foreground)     │              update_close()：每次新取樣後
+  growth::Tracker::update(apps)   │
   pagefile::query()              ─┘                close::blocker / Closing::poll（在 UI 執行緒）
 ```
 
@@ -72,6 +73,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 
 `Collector` 會快取每個程序實例 `(pid, 啟動時間)` 的 Chromium 旗標，命令列只讀一次。
 `Tracker` 以程序實例計算 CPU／I/O 增量；新出現的程序第一次沒有基準值，不算活動。
+`growth::Tracker` 記錄每個程式每分鐘的私有記憶體最低值（保留 6 小時），只在記憶體中，不寫檔。
 
 | 檔案 | 職責 |
 |---|---|
@@ -85,6 +87,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `src/priority.rs` | `Governor`：降低／還原記憶體優先權、自動還原、當機還原紀錄檔（M4） |
 | `src/trim.rs` | 修剪長時間閒置程式的工作集，在背景執行緒進行並回報實際移出量（M5） |
 | `src/close.rs` | 關閉建議：判定建議關閉的程式、對其最上層視窗送 `WM_CLOSE`、追蹤結果（M7） |
+| `src/growth.rs` | 記憶體成長追蹤：每分鐘私有記憶體底線、重新啟動判定、持續成長判定（M8，唯讀） |
 | `src/pagefile.rs` | 分頁檔設定與大小（唯讀）、系統管理時的最大值、開啟 Windows「效能選項」（M7） |
 | `src/audio.rs` | Core Audio：找出有作用中播放／錄音工作階段的程序（M5） |
 | `src/integration.rs` | 「瀏覽器整合」開關：寫入／刪除 host 資訊清單與 HKCU 的 Native Messaging 機碼（M6） |
@@ -152,9 +155,9 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 
 ## 7. 驗證方式
 
-1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告（目前 memwarden 35 項 + host 10 項）。
+1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告（目前 memwarden 45 項 + host 10 項）。
    純邏輯：`classify.rs` 分類與 WebView2 歸屬、`activity.rs` 狀態轉換、`bridge.rs` 訊息處理、
-   `close.rs` 建議條件與結果判定、`pagefile.rs` 設定解析與最大值。
+   `close.rs` 建議條件與結果判定、`pagefile.rs` 設定解析與最大值、`growth.rs` 底線彙總與成長判定。
    會呼叫 Win32 的測試只操作測試自己啟動的子程序：`priority.rs`、`trim.rs`（`cmd.exe`），
    `close.rs`（以 PowerShell 開一個縮小的 WinForms 視窗再送 `WM_CLOSE`，測試期間工作列會短暫出現它），
    `integration.rs`（暫時的 `HKCU\Software\memwarden-test-*` 機碼）。
@@ -164,7 +167,7 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
    ```
    這個腳本用 `PrintWindow` 只擷取 memwarden 視窗，不會截到其他視窗。
    閒置狀態需要 `-WaitSeconds 370`（5 分鐘以上）；修剪按鈕需要 `-WaitSeconds 970`（15 分鐘以上）；
-   關閉建議需要 30 分鐘以上。
+   關閉建議需要 30 分鐘以上；持續成長需要 60 分鐘以上，且要有程式的底線成長 500 MB 以上。
    已經有另一個 memwarden 在執行時，新開的視窗不會顯示（截圖只有 16×16），先關掉原本的再截圖。
    懸停說明（tooltip）無法用這個腳本驗證，需要在實際視窗上用滑鼠確認。
 3. 音訊偵測可對真實系統執行診斷：`cargo test audio -- --ignored --nocapture`（印出正在播放／錄音的 PID）。
@@ -178,7 +181,7 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 
 ## 8. 已知問題與限制
 
-- 閒置判定只能從 memwarden 啟動後開始累計。
+- 閒置判定與記憶體成長都只能從 memwarden 啟動後開始累計；成長的門檻（`growth.rs` 開頭）是初值，待實測調整。
 - UWP 應用程式的前景視窗屬於 `ApplicationFrameHost.exe`，前景偵測無法對應到實際的 UWP 程序；
   它們仍可由 CPU／I/O 判定活動。
 - 分類依賴 `classify.rs` 中的已知清單；不在清單內的安全軟體會被歸為一般應用程式。

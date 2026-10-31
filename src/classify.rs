@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use crate::activity::Status;
+use crate::growth::Growth;
 use crate::process::ProcessInfo;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -90,6 +91,8 @@ pub struct AppUsage {
     pub lowered: bool,
     /// Has an active audio session (playing or recording). Set by the activity tracker.
     pub audio: bool,
+    /// Set by the growth tracker when private memory keeps growing.
+    pub growth: Option<Growth>,
 }
 
 struct Group {
@@ -124,6 +127,7 @@ pub fn group(procs: &[ProcessInfo]) -> (Vec<AppUsage>, usize) {
                 status: Status::Active,
                 lowered: false,
                 audio: false,
+                growth: None,
             },
             web_engine: false,
             all_services: true,

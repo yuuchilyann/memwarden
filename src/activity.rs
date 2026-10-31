@@ -175,6 +175,7 @@ mod tests {
             status: Status::Active,
             lowered: false,
             audio: false,
+            growth: None,
         }
     }
 

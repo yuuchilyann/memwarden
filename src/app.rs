@@ -14,6 +14,7 @@ use crate::activity::Status;
 use crate::bridge::{Bridge, BrowserTabs, Discard};
 use crate::classify::{AppUsage, Category};
 use crate::close::{self, Closing, Outcome, Refusal};
+use crate::growth::{self, Growth};
 use crate::i18n::Lang;
 use crate::integration::{self, Integration};
 use crate::pagefile;
@@ -22,7 +23,7 @@ use crate::process::Instance;
 use crate::trim;
 use crate::sampler::{self, Snapshot};
 use crate::theme::{
-    self, AMBER, BLUE, CARD, CARD_BORDER, CRITICAL_PCT, CYAN, GREEN, MUTED, RED, SLATE, TRACK, VIOLET,
+    self, AMBER, BLUE, CARD, CARD_BORDER, CRITICAL_PCT, CYAN, GREEN, MUTED, ORANGE, RED, SLATE, TRACK, VIOLET,
 };
 
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
@@ -126,6 +127,7 @@ struct Filter {
     category: Option<Category>,
     idle_only: bool,
     close_only: bool,
+    growth_only: bool,
 }
 
 impl Filter {
@@ -134,11 +136,18 @@ impl Filter {
             && self.category.is_none_or(|c| c == app.category)
             && (!self.idle_only || is_idle_candidate(app))
             && (!self.close_only || close::suggested(app))
+            && (!self.growth_only || app.growth.is_some())
     }
 }
 
 fn is_idle_candidate(app: &AppUsage) -> bool {
     app.category.idle_candidate() && matches!(app.status, Status::Idle(_))
+}
+
+/// A growing app is suggested for a restart unless it is idle long enough
+/// to be suggested for closing, which the status column shows first.
+fn restart_suggested(app: &AppUsage) -> bool {
+    growth::suggested(app) && !close::suggested(app)
 }
 
 /// The application group a browser process instance belongs to.
@@ -198,7 +207,7 @@ impl App {
         c.close_blockers = snap
             .apps
             .iter()
-            .filter(|a| close::suggested(a))
+            .filter(|a| close::suggested(a) || growth::suggested(a))
             .filter_map(|a| close::blocker(&a.instances).map(|r| (a.name.clone(), r)))
             .collect();
         let done = c.closing.as_mut().and_then(|closing| {
@@ -660,11 +669,12 @@ fn status_text(app: &AppUsage) -> RichText {
     if !app.category.idle_candidate() {
         return RichText::new("—").color(MUTED);
     }
-    let (text, color) = match app.status {
+    let (text, color) = match (&app.growth, app.status) {
         _ if close::suggested(app) => (t!("close.status"), RED),
-        Status::Active => (t!("activity.active"), GREEN),
-        Status::Inactive => (t!("activity.inactive"), MUTED),
-        Status::Idle(quiet) => (t!("activity.idle", min = quiet.as_secs() / 60), AMBER),
+        (Some(g), _) => (t!("growth.status", size = fmt_bytes(g.increase())), ORANGE),
+        (None, Status::Active) => (t!("activity.active"), GREEN),
+        (None, Status::Inactive) => (t!("activity.inactive"), MUTED),
+        (None, Status::Idle(quiet)) => (t!("activity.idle", min = quiet.as_secs() / 60), AMBER),
     };
     // A note marks apps with an active audio session; an arrow marks apps
     // whose memory priority memwarden lowered.
@@ -699,6 +709,12 @@ fn apps_card(
             .iter()
             .filter(|a| close::suggested(a))
             .fold((0usize, 0u64), |acc, a| (acc.0 + 1, acc.1 + a.private));
+        let (growth_count, growth_bytes) = snap
+            .apps
+            .iter()
+            .filter(|a| restart_suggested(a))
+            .filter_map(|a| a.growth.as_ref())
+            .fold((0usize, 0u64), |acc, g| (acc.0 + 1, acc.1 + g.increase()));
         let (lowered, failed) = priority;
         let trimming = controls.trimming.is_some();
 
@@ -723,6 +739,16 @@ fn apps_card(
                     t!("close.summary", count = close_count, size = size)
                 };
                 chip(ui, &summary, RED).on_hover_text(help);
+            }
+            if growth_count > 0 {
+                let help = t!(
+                    "growth.summary_help",
+                    min = growth::MIN_OBSERVED_MINUTES,
+                    mb = growth::MIN_INCREASE / (1024 * 1024),
+                    ratio = growth::MIN_RATIO
+                );
+                let summary = t!("growth.summary", count = growth_count, size = fmt_bytes(growth_bytes));
+                chip(ui, &summary, ORANGE).on_hover_text(help);
             }
             if let Some(r) = &controls.last_trim {
                 chip(ui, &t!("trim.result", count = r.apps, size = fmt_bytes(r.freed)), GREEN);
@@ -750,6 +776,7 @@ fn apps_card(
                 });
             ui.checkbox(&mut filter.idle_only, t!("apps.idle_only"));
             ui.checkbox(&mut filter.close_only, t!("apps.close_only"));
+            ui.checkbox(&mut filter.growth_only, t!("apps.growth_only"));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if let Some(bulk) = controls.confirm.clone() {
                     if ui.button(t!("priority.cancel")).clicked() {
@@ -780,11 +807,12 @@ fn apps_card(
                                 Action::DiscardTabs(browser),
                             )
                         }
-                        Bulk::Close(name) => (
-                            t!("close.confirm_yes"),
-                            t!("close.confirm", name = name.as_str()),
-                            Action::Close(name),
-                        ),
+                        Bulk::Close(name) => {
+                            // A growing app is closed to be reopened; memwarden cannot reopen it.
+                            let restart = snap.apps.iter().any(|a| a.name == name && restart_suggested(a));
+                            let key = if restart { "growth.confirm" } else { "close.confirm" };
+                            (t!("close.confirm_yes"), t!(key, name = name.as_str()), Action::Close(name))
+                        }
                     };
                     if ui.button(RichText::new(yes).color(AMBER)).clicked() {
                         actions.push(action);
@@ -894,6 +922,8 @@ fn apps_card(
                         if let (true, Status::Idle(quiet)) = (close::suggested(a), a.status) {
                             let size = fmt_bytes(a.private);
                             status.on_hover_text(t!("close.status_help", min = quiet.as_secs() / 60, size = size));
+                        } else if let Some(g) = &a.growth {
+                            status.on_hover_ui(|ui| growth_help(ui, g));
                         }
                     });
                     row.col(|ui| {
@@ -915,7 +945,7 @@ fn apps_card(
                                 actions.push(Action::Trim(a.name.clone()));
                             }
                         }
-                        if close::suggested(a) {
+                        if close::suggested(a) || growth::suggested(a) {
                             let blocker = controls.close_blockers.get(&a.name).copied();
                             let enabled = blocker.is_none() && controls.closing.is_none() && controls.confirm.is_none();
                             let mut button = ui
@@ -979,6 +1009,36 @@ fn tabs_rows(ui: &mut Ui, snap: &Snapshot, (browsers, incompatible): (&[BrowserT
             }
         });
     }
+}
+
+/// How a growing app's floor rose, with a small chart of the per-minute floors.
+fn growth_help(ui: &mut Ui, g: &Growth) {
+    let minutes = g.span.as_secs() / 60;
+    ui.label(t!(
+        "growth.status_help",
+        h = minutes / 60,
+        m = minutes % 60,
+        low = fmt_bytes(g.low),
+        current = fmt_bytes(g.current)
+    ));
+    let (rect, _) = ui.allocate_exact_size(vec2(280.0, 56.0), Sense::hover());
+    let (Some(&(first, _)), Some(&(last, _))) = (g.floors.first(), g.floors.last()) else { return };
+    // Scaled from zero, so the height shows how much of the app's memory is growth.
+    let max = g.floors.iter().map(|&(_, b)| b).max().unwrap_or(1).max(1) as f32;
+    let span = (last - first).max(1) as f32;
+    let points = g
+        .floors
+        .iter()
+        .map(|&(m, b)| {
+            egui::pos2(
+                rect.left() + rect.width() * (m - first) as f32 / span,
+                rect.bottom() - rect.height() * b as f32 / max,
+            )
+        })
+        .collect();
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::same(4), TRACK);
+    painter.add(egui::Shape::line(points, Stroke::new(1.5, ORANGE)));
 }
 
 /// Progress or result of the latest close request.

@@ -10,6 +10,7 @@ use eframe::egui;
 use crate::activity::Tracker;
 use crate::audio;
 use crate::classify::{self, AppUsage};
+use crate::growth;
 use crate::pagefile::{self, PageFiles};
 use crate::priority::Governor;
 use crate::process::{self, Collector};
@@ -33,11 +34,13 @@ pub fn spawn(ctx: egui::Context, interval: Duration, governor: Arc<Mutex<Governo
             audio::init_thread();
             let mut collector = Collector::default();
             let mut tracker = Tracker::new();
+            let mut growth = growth::Tracker::default();
             loop {
                 if let (Ok(sys), Ok(procs)) = (system::query(), collector.list()) {
                     let now = Instant::now();
                     let (mut apps, denied) = classify::group(&procs);
                     tracker.update(&procs, &mut apps, process::foreground_pid(), &audio::active_pids(), now);
+                    growth.update(&mut apps, now);
                     governor.lock().unwrap_or_else(|e| e.into_inner()).sync(&mut apps);
                     let pagefile = pagefile::query(sys.phys_total);
                     let snap = Snapshot { taken: now, sys, apps, denied, pagefile };

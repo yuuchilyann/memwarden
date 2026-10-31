@@ -1,0 +1,38 @@
+_version: 1
+
+app.subtitle: "メモリダッシュボード"
+
+status.live: "● ライブ"
+status.updated: "%{secs} 秒前に更新"
+status.sampling: "取得中…"
+status.read_only: "読み取り専用"
+
+kpi.physical.title: "物理メモリ"
+kpi.physical.detail: "合計 %{total} · %{pct}%"
+kpi.commit.title: "コミットチャージ"
+kpi.commit.detail: "上限 %{limit} · %{pct}%"
+kpi.available.title: "利用可能"
+kpi.available.detail: "スタンバイ + 空き · キャッシュ %{cache}"
+kpi.kernel.title: "カーネルプール"
+kpi.kernel.detail: "ページ %{paged} · 非ページ %{nonpaged}"
+
+alert.commit: "コミットチャージが上限の %{pct}% に達しています。100% になるとアプリがクラッシュする恐れがあります。不要なアプリを閉じるか、ページファイルを拡張してください。"
+
+history.title: "使用率の推移 · 直近 10 分"
+history.physical: "物理メモリ"
+history.commit: "コミット"
+history.critical: "警告ライン"
+history.minutes: "%{n} 分"
+
+top.title: "使用量ランキング · プライベート"
+
+apps.title: "アプリケーション"
+apps.entries: "%{count} 件"
+apps.unreadable: "%{count} 件は読み取り不可 · 管理者として実行するとすべて表示"
+apps.filter: "名前で絞り込み…"
+
+col.name: "名前"
+col.processes: "プロセス数"
+col.private: "プライベート"
+col.working_set: "ワーキングセット"
+col.share: "物理メモリに占める割合"

@@ -5,7 +5,6 @@ use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTAT
 
 /// All values in bytes.
 pub struct SystemMemory {
-    pub load_percent: u32,
     pub phys_total: u64,
     pub phys_avail: u64,
     pub commit_total: u64,
@@ -15,7 +14,21 @@ pub struct SystemMemory {
     pub kernel_nonpaged: u64,
 }
 
-pub fn query() -> windows::core::Result<SystemMemory> {
+impl SystemMemory {
+    pub fn phys_used(&self) -> u64 {
+        self.phys_total - self.phys_avail
+    }
+
+    pub fn phys_pct(&self) -> f64 {
+        self.phys_used() as f64 * 100.0 / self.phys_total as f64
+    }
+
+    pub fn commit_pct(&self) -> f64 {
+        self.commit_total as f64 * 100.0 / self.commit_limit as f64
+    }
+}
+
+pub fn query() ->windows::core::Result<SystemMemory> {
     let mut ms = MEMORYSTATUSEX {
         dwLength: size_of::<MEMORYSTATUSEX>() as u32,
         ..Default::default()
@@ -28,7 +41,6 @@ pub fn query() -> windows::core::Result<SystemMemory> {
     // PERFORMANCE_INFORMATION reports page counts.
     let page = pi.PageSize as u64;
     Ok(SystemMemory {
-        load_percent: ms.dwMemoryLoad,
         phys_total: ms.ullTotalPhys,
         phys_avail: ms.ullAvailPhys,
         commit_total: pi.CommitTotal as u64 * page,

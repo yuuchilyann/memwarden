@@ -1,0 +1,38 @@
+_version: 1
+
+app.subtitle: "Memory dashboard"
+
+status.live: "● Live"
+status.updated: "updated %{secs}s ago"
+status.sampling: "sampling…"
+status.read_only: "read-only"
+
+kpi.physical.title: "Physical memory"
+kpi.physical.detail: "of %{total} · %{pct}%"
+kpi.commit.title: "Commit charge"
+kpi.commit.detail: "of %{limit} limit · %{pct}%"
+kpi.available.title: "Available"
+kpi.available.detail: "standby + free · cache %{cache}"
+kpi.kernel.title: "Kernel pool"
+kpi.kernel.detail: "paged %{paged} · nonpaged %{nonpaged}"
+
+alert.commit: "Commit charge is at %{pct}% of the limit. At 100% applications can fail to allocate memory and crash. Close unused applications or enlarge the page file."
+
+history.title: "Usage history · last 10 minutes"
+history.physical: "Physical"
+history.commit: "Commit"
+history.critical: "Critical"
+history.minutes: "%{n} min"
+
+top.title: "Top consumers · private bytes"
+
+apps.title: "Applications"
+apps.entries: "%{count} entries"
+apps.unreadable: "%{count} unreadable · run as administrator for all"
+apps.filter: "Filter by name…"
+
+col.name: "Name"
+col.processes: "Processes"
+col.private: "Private"
+col.working_set: "Working set"
+col.share: "Share of RAM (private)"

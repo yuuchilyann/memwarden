@@ -1,0 +1,38 @@
+_version: 1
+
+app.subtitle: "記憶體儀表板"
+
+status.live: "● 即時"
+status.updated: "%{secs} 秒前更新"
+status.sampling: "取樣中…"
+status.read_only: "唯讀模式"
+
+kpi.physical.title: "實體記憶體"
+kpi.physical.detail: "共 %{total} · %{pct}%"
+kpi.commit.title: "認可記憶體 (Commit)"
+kpi.commit.detail: "上限 %{limit} · %{pct}%"
+kpi.available.title: "可用記憶體"
+kpi.available.detail: "備用 + 閒置 · 快取 %{cache}"
+kpi.kernel.title: "核心集區"
+kpi.kernel.detail: "分頁 %{paged} · 非分頁 %{nonpaged}"
+
+alert.commit: "認可記憶體已達上限的 %{pct}%。到達 100% 時，應用程式可能無法配置記憶體而當機。請關閉不使用的應用程式，或加大分頁檔。"
+
+history.title: "使用率歷史 · 最近 10 分鐘"
+history.physical: "實體記憶體"
+history.commit: "認可記憶體"
+history.critical: "警戒線"
+history.minutes: "%{n} 分"
+
+top.title: "用量排行 · 私有記憶體"
+
+apps.title: "應用程式"
+apps.entries: "共 %{count} 項"
+apps.unreadable: "%{count} 個無法讀取 · 以系統管理員身分執行可讀取全部"
+apps.filter: "依名稱篩選…"
+
+col.name: "名稱"
+col.processes: "處理程序"
+col.private: "私有記憶體"
+col.working_set: "工作集"
+col.share: "占實體記憶體比例"

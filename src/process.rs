@@ -1,5 +1,7 @@
 //! Per-process memory enumeration (read-only access rights only).
 
+use std::collections::HashMap;
+
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -39,6 +41,41 @@ pub fn list() -> windows::core::Result<Vec<ProcessInfo>> {
     }
     unsafe { CloseHandle(snap)? };
     Ok(out)
+}
+
+/// Memory of all processes sharing one executable name.
+#[derive(Clone)]
+pub struct AppUsage {
+    pub name: String,
+    pub count: usize,
+    pub private: u64,
+    pub working_set: u64,
+}
+
+/// Groups processes by executable name so multi-process apps (Chrome, Electron)
+/// appear as one entry, sorted by private bytes. Also returns how many processes
+/// could not be read.
+pub fn grouped() -> windows::core::Result<(Vec<AppUsage>, usize)> {
+    let mut groups: HashMap<String, AppUsage> = HashMap::new();
+    let mut denied = 0usize;
+    for p in list()? {
+        let Some(m) = p.mem else {
+            denied += 1;
+            continue;
+        };
+        let g = groups.entry(p.name.clone()).or_insert_with(|| AppUsage {
+            name: p.name,
+            count: 0,
+            private: 0,
+            working_set: 0,
+        });
+        g.count += 1;
+        g.private += m.private;
+        g.working_set += m.working_set;
+    }
+    let mut apps: Vec<_> = groups.into_values().collect();
+    apps.sort_by(|a, b| b.private.cmp(&a.private));
+    Ok((apps, denied))
 }
 
 fn memory_of(pid: u32) -> Option<MemInfo> {

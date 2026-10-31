@@ -1,0 +1,38 @@
+_version: 1
+
+app.subtitle: "메모리 대시보드"
+
+status.live: "● 실시간"
+status.updated: "%{secs}초 전 업데이트"
+status.sampling: "수집 중…"
+status.read_only: "읽기 전용"
+
+kpi.physical.title: "물리 메모리"
+kpi.physical.detail: "전체 %{total} · %{pct}%"
+kpi.commit.title: "커밋 차지"
+kpi.commit.detail: "한도 %{limit} · %{pct}%"
+kpi.available.title: "사용 가능"
+kpi.available.detail: "대기 + 여유 · 캐시 %{cache}"
+kpi.kernel.title: "커널 풀"
+kpi.kernel.detail: "페이징 %{paged} · 비페이징 %{nonpaged}"
+
+alert.commit: "커밋 차지가 한도의 %{pct}%에 도달했습니다. 100%가 되면 앱이 메모리를 할당하지 못해 비정상 종료될 수 있습니다. 사용하지 않는 앱을 닫거나 페이지 파일을 늘리세요."
+
+history.title: "사용량 추이 · 최근 10분"
+history.physical: "물리 메모리"
+history.commit: "커밋"
+history.critical: "경고선"
+history.minutes: "%{n}분"
+
+top.title: "사용량 순위 · 전용 메모리"
+
+apps.title: "애플리케이션"
+apps.entries: "%{count}개 항목"
+apps.unreadable: "%{count}개 읽을 수 없음 · 관리자 권한으로 실행하면 모두 표시"
+apps.filter: "이름으로 필터…"
+
+col.name: "이름"
+col.processes: "프로세스"
+col.private: "전용 메모리"
+col.working_set: "작업 집합"
+col.share: "물리 메모리 점유율"

@@ -1,102 +1,163 @@
-//! Per-process memory enumeration (read-only access rights only).
+//! Per-process data from Win32 (read-only access rights only).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessCommandLineInformation};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, UNICODE_STRING};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::ProcessStatus::{
     GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
 };
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-
-pub struct MemInfo {
-    pub private: u64,
-    pub working_set: u64,
-}
+use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+use windows::Win32::System::Threading::{
+    GetProcessIoCounters, GetProcessTimes, IO_COUNTERS, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
 pub struct ProcessInfo {
+    pub pid: u32,
+    pub parent_pid: u32,
     pub name: String,
+    /// Terminal Services session; session 0 hosts services.
+    pub session: Option<u32>,
     /// `None` when the process cannot be opened (protected or higher privilege).
-    pub mem: Option<MemInfo>,
+    pub stats: Option<ProcStats>,
 }
 
-pub fn list() -> windows::core::Result<Vec<ProcessInfo>> {
-    let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)? };
-    let mut out = Vec::new();
-    let mut entry = PROCESSENTRY32W {
-        dwSize: size_of::<PROCESSENTRY32W>() as u32,
-        ..Default::default()
-    };
-    let mut ok = unsafe { Process32FirstW(snap, &mut entry) }.is_ok();
-    while ok {
-        let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
-        let pid = entry.th32ProcessID;
-        out.push(ProcessInfo {
-            name: String::from_utf16_lossy(&entry.szExeFile[..len]),
-            mem: if pid == 0 { None } else { memory_of(pid) },
-        });
-        ok = unsafe { Process32NextW(snap, &mut entry) }.is_ok();
-    }
-    unsafe { CloseHandle(snap)? };
-    Ok(out)
-}
-
-/// Memory of all processes sharing one executable name.
-#[derive(Clone)]
-pub struct AppUsage {
-    pub name: String,
-    pub count: usize,
+pub struct ProcStats {
     pub private: u64,
     pub working_set: u64,
+    /// Start time in FILETIME ticks; together with the PID it identifies one process instance.
+    pub created: u64,
+    /// Kernel + user CPU time in 100 ns units.
+    pub cpu_time: u64,
+    /// Bytes moved by read, write and other I/O operations.
+    pub io_bytes: u64,
+    /// Chromium-style child process (`--type=` argument), as spawned by Electron and CEF apps.
+    pub chromium_child: bool,
 }
 
-/// Groups processes by executable name so multi-process apps (Chrome, Electron)
-/// appear as one entry, sorted by private bytes. Also returns how many processes
-/// could not be read.
-pub fn grouped() -> windows::core::Result<(Vec<AppUsage>, usize)> {
-    let mut groups: HashMap<String, AppUsage> = HashMap::new();
-    let mut denied = 0usize;
-    for p in list()? {
-        let Some(m) = p.mem else {
-            denied += 1;
-            continue;
+/// Enumerates processes, caching per-instance facts that never change.
+#[derive(Default)]
+pub struct Collector {
+    chromium_child: HashMap<(u32, u64), bool>,
+}
+
+impl Collector {
+    pub fn list(&mut self) -> windows::core::Result<Vec<ProcessInfo>> {
+        let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)? };
+        let mut out = Vec::new();
+        let mut entry = PROCESSENTRY32W {
+            dwSize: size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
         };
-        let g = groups.entry(p.name.clone()).or_insert_with(|| AppUsage {
-            name: p.name,
-            count: 0,
-            private: 0,
-            working_set: 0,
-        });
-        g.count += 1;
-        g.private += m.private;
-        g.working_set += m.working_set;
+        let mut ok = unsafe { Process32FirstW(snap, &mut entry) }.is_ok();
+        while ok {
+            let pid = entry.th32ProcessID;
+            // PID 0 is the idle pseudo-process, not a real program.
+            if pid != 0 {
+                let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                let mut session = 0;
+                out.push(ProcessInfo {
+                    pid,
+                    parent_pid: entry.th32ParentProcessID,
+                    name: String::from_utf16_lossy(&entry.szExeFile[..len]),
+                    session: unsafe { ProcessIdToSessionId(pid, &mut session) }.ok().map(|_| session),
+                    stats: self.stats_of(pid),
+                });
+            }
+            ok = unsafe { Process32NextW(snap, &mut entry) }.is_ok();
+        }
+        unsafe { CloseHandle(snap)? };
+
+        // Forget processes that have exited.
+        let alive: HashSet<(u32, u64)> =
+            out.iter().filter_map(|p| p.stats.as_ref().map(|s| (p.pid, s.created))).collect();
+        self.chromium_child.retain(|key, _| alive.contains(key));
+        Ok(out)
     }
-    let mut apps: Vec<_> = groups.into_values().collect();
-    apps.sort_by(|a, b| b.private.cmp(&a.private));
-    Ok((apps, denied))
+
+    fn stats_of(&mut self, pid: u32) -> Option<ProcStats> {
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+        let stats = self.read_stats(handle, pid);
+        unsafe {
+            let _ = CloseHandle(handle);
+        }
+        stats
+    }
+
+    fn read_stats(&mut self, handle: HANDLE, pid: u32) -> Option<ProcStats> {
+        let mut pmc = PROCESS_MEMORY_COUNTERS_EX {
+            cb: size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,
+            ..Default::default()
+        };
+        unsafe { GetProcessMemoryInfo(handle, &mut pmc as *mut _ as *mut PROCESS_MEMORY_COUNTERS, pmc.cb) }.ok()?;
+
+        let (mut created, mut exited, mut kernel, mut user) = Default::default();
+        unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) }.ok()?;
+        let created = ticks(created);
+
+        let mut io = IO_COUNTERS::default();
+        let io_bytes = match unsafe { GetProcessIoCounters(handle, &mut io) } {
+            Ok(()) => io.ReadTransferCount + io.WriteTransferCount + io.OtherTransferCount,
+            Err(_) => 0,
+        };
+
+        let chromium_child =
+            *self.chromium_child.entry((pid, created)).or_insert_with(|| has_chromium_type_flag(handle));
+
+        Some(ProcStats {
+            private: pmc.PrivateUsage as u64,
+            working_set: pmc.WorkingSetSize as u64,
+            created,
+            cpu_time: ticks(kernel) + ticks(user),
+            io_bytes,
+            chromium_child,
+        })
+    }
 }
 
-fn memory_of(pid: u32) -> Option<MemInfo> {
-    let handle: HANDLE = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
-    let mut pmc = PROCESS_MEMORY_COUNTERS_EX {
-        cb: size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,
-        ..Default::default()
-    };
-    let res = unsafe {
-        GetProcessMemoryInfo(
-            handle,
-            &mut pmc as *mut _ as *mut PROCESS_MEMORY_COUNTERS,
-            pmc.cb,
-        )
-    };
+fn ticks(t: FILETIME) -> u64 {
+    (t.dwHighDateTime as u64) << 32 | t.dwLowDateTime as u64
+}
+
+/// Checks the command line for Chromium's `--type=` switch.
+/// The command line can hold tokens or private paths, so it is only scanned
+/// here and dropped; it is never stored, logged or displayed.
+fn has_chromium_type_flag(handle: HANDLE) -> bool {
+    let mut len = 0u32;
     unsafe {
-        let _ = CloseHandle(handle);
+        let _ = NtQueryInformationProcess(handle, ProcessCommandLineInformation, std::ptr::null_mut(), 0, &mut len);
     }
-    res.ok()?;
-    Some(MemInfo {
-        private: pmc.PrivateUsage as u64,
-        working_set: pmc.WorkingSetSize as u64,
-    })
+    if len == 0 {
+        return false;
+    }
+    // u64 elements keep the buffer aligned for the UNICODE_STRING header.
+    let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+    let status = unsafe {
+        NtQueryInformationProcess(handle, ProcessCommandLineInformation, buf.as_mut_ptr().cast(), len, &mut len)
+    };
+    if status.0 < 0 {
+        return false;
+    }
+    let text = unsafe { &*(buf.as_ptr() as *const UNICODE_STRING) };
+    if text.Buffer.is_null() {
+        return false;
+    }
+    let chars = unsafe { std::slice::from_raw_parts(text.Buffer.0, text.Length as usize / 2) };
+    let needle: Vec<u16> = "--type=".encode_utf16().collect();
+    chars.windows(needle.len()).any(|w| w == needle.as_slice())
+}
+
+/// Process owning the foreground window, if any.
+pub fn foreground_pid() -> Option<u32> {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_invalid() {
+        return None;
+    }
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    (pid != 0).then_some(pid)
 }

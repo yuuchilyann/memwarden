@@ -26,7 +26,8 @@ public static class MemwardenCapture {
 "@
 Add-Type -AssemblyName System.Drawing
 [MemwardenCapture]::SetProcessDPIAware() | Out-Null
-New-Item -ItemType Directory -Force $OutDir | Out-Null
+# .NET resolves relative paths against the process directory, not the PowerShell location.
+$OutDir = (New-Item -ItemType Directory -Force $OutDir).FullName
 $PW_RENDERFULLCONTENT = 2
 
 foreach ($lang in $Langs) {

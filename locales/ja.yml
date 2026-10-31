@@ -36,3 +36,23 @@ col.processes: "プロセス数"
 col.private: "プライベート"
 col.working_set: "ワーキングセット"
 col.share: "物理メモリに占める割合"
+
+apps.idle_summary: "アイドル %{count} 件 · %{size}"
+apps.idle_only: "アイドルのみ"
+
+col.category: "カテゴリ"
+col.cpu: "CPU"
+col.status: "状態"
+
+category.all: "すべてのカテゴリ"
+category.application: "一般アプリ"
+category.webapp: "Web 技術アプリ"
+category.browser: "ブラウザー"
+category.service: "サービス"
+category.vm: "仮想マシン"
+category.security: "セキュリティ"
+category.system: "システム"
+
+activity.active: "使用中"
+activity.inactive: "非アクティブ"
+activity.idle: "アイドル %{min} 分"

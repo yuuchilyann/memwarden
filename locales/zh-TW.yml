@@ -36,3 +36,23 @@ col.processes: "處理程序"
 col.private: "私有記憶體"
 col.working_set: "工作集"
 col.share: "占實體記憶體比例"
+
+apps.idle_summary: "閒置 %{count} 個 · %{size}"
+apps.idle_only: "只顯示閒置"
+
+col.category: "類別"
+col.cpu: "CPU"
+col.status: "狀態"
+
+category.all: "所有類別"
+category.application: "一般應用程式"
+category.webapp: "Web 技術應用"
+category.browser: "瀏覽器"
+category.service: "背景服務"
+category.vm: "虛擬機"
+category.security: "安全防護"
+category.system: "系統"
+
+activity.active: "使用中"
+activity.inactive: "不活躍"
+activity.idle: "閒置 %{min} 分"

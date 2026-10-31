@@ -10,7 +10,9 @@ use eframe::egui;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
+mod activity;
 mod app;
+mod classify;
 mod i18n;
 mod process;
 mod sampler;
@@ -22,7 +24,7 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("memwarden")
             .with_inner_size([1200.0, 800.0])
-            .with_min_inner_size([960.0, 640.0]),
+            .with_min_inner_size([1040.0, 680.0]),
         ..Default::default()
     };
     eframe::run_native(

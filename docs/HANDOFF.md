@@ -32,12 +32,16 @@ $env:MEMWARDEN_LANG = "ja"; cargo run   # 強制指定語言（zh-TW / en / ja /
 ## 4. 架構
 
 ```
-sampler 執行緒（每 2 秒）                 UI 執行緒（eframe）
-  system::query()  ─┐                       App::ui()
-  process::grouped()├─ Snapshot ── mpsc ──▶   drain_samples() → history
-                    ┘                          header / kpi_row / history_card
-                                               top_card / apps_card
+sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
+  system::query()                ─┐              App::ui()
+  Collector::list()  → procs      │                drain_samples() → history
+  classify::group(procs) → apps   ├ Snapshot ─mpsc─▶ header / kpi_row / history_card
+  Tracker::update(procs, apps,    │                top_card / apps_card（篩選、類別、狀態）
+                  foreground)    ─┘
 ```
+
+`Collector` 會快取每個程序實例 `(pid, 啟動時間)` 的 Chromium 旗標，命令列只讀一次。
+`Tracker` 以程序實例計算 CPU／I/O 增量；新出現的程序第一次沒有基準值，不算活動。
 
 | 檔案 | 職責 |
 |---|---|
@@ -45,7 +49,9 @@ sampler 執行緒（每 2 秒）                 UI 執行緒（eframe）
 | `src/app.rs` | 儀表板 UI 與狀態（歷史資料、篩選、語言） |
 | `src/sampler.rs` | 背景取樣執行緒，避免列舉程序時卡住 UI |
 | `src/system.rs` | 系統層級：`GlobalMemoryStatusEx`、`GetPerformanceInfo` |
-| `src/process.rs` | 程序層級：Toolhelp 列舉、`GetProcessMemoryInfo`、依執行檔名分組 |
+| `src/process.rs` | 程序層級原始資料：Toolhelp 列舉、記憶體、CPU 時間、I/O、Session、Chromium `--type=` 偵測、前景程序 |
+| `src/classify.rs` | 依執行檔名分組成「應用程式」、WebView2 歸屬到擁有者、分類（系統／安全／虛擬機／服務／瀏覽器／Web 技術／一般） |
+| `src/activity.rs` | 跨取樣追蹤 CPU、I/O、前景，判定使用中／不活躍／閒置 |
 | `src/theme.rs` | 深色主題配色、依語言載入 Windows 系統字型 |
 | `src/i18n.rs` | 語言列舉、偵測 Windows 顯示語言 |
 | `locales/*.yml` | 介面文字（每語言一檔，缺字回退英文） |
@@ -81,7 +87,8 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 
 ## 7. 驗證方式
 
-1. `cargo build`，必須沒有錯誤與警告。
+1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告。單元測試涵蓋不需呼叫 Win32 的純邏輯
+   （`classify.rs` 分類與 WebView2 歸屬、`activity.rs` 狀態轉換）。
 2. 執行 `scripts/capture-window.ps1` 擷取四種語言的截圖並目視檢查：
    ```powershell
    .\scripts\capture-window.ps1 -Exe .\target\debug\memwarden.exe -OutDir .\screenshots -Langs zh-TW,en,ja,ko
@@ -92,7 +99,11 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 ## 8. 已知問題與限制
 
 - 閒置判定只能從 memwarden 啟動後開始累計。
+- UWP 應用程式的前景視窗屬於 `ApplicationFrameHost.exe`，前景偵測無法對應到實際的 UWP 程序；
+  它們仍可由 CPU／I/O 判定活動。
+- 分類依賴 `classify.rs` 中的已知清單；不在清單內的安全軟體會被歸為一般應用程式。
 - CJK 字型占自身記憶體約 30–60 MB（正黑體約 20 MB、Malgun Gothic 約 13 MB）。
 - 日文模式為了基線一致，Latin 文字也用 Yu Gothic 繪製。
 - 歷史圖例的排序由 egui_plot 依名稱決定，各語言順序不同。
-- 尚無自動化測試；目前靠編譯與截圖驗證。
+- UI 沒有自動化測試，靠截圖目視驗證。
+- 閒置門檻（30 秒平均、單核心 5%、512 KB/s、5 分鐘）是依開發機實測訂的經驗值，常數在 `activity.rs` 開頭。

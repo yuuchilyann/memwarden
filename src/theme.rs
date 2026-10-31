@@ -18,6 +18,8 @@ pub const VIOLET: Color32 = Color32::from_rgb(0xa7, 0x8b, 0xfa);
 pub const GREEN: Color32 = Color32::from_rgb(0x34, 0xd3, 0x99);
 pub const AMBER: Color32 = Color32::from_rgb(0xfb, 0xbf, 0x24);
 pub const RED: Color32 = Color32::from_rgb(0xf8, 0x71, 0x71);
+pub const CYAN: Color32 = Color32::from_rgb(0x22, 0xd3, 0xee);
+pub const SLATE: Color32 = Color32::from_rgb(0x94, 0xa3, 0xb8);
 
 /// Usage at or above this percentage is shown as critical.
 pub const CRITICAL_PCT: f64 = 85.0;

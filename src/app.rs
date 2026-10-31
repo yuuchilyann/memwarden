@@ -9,15 +9,18 @@ use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use egui_plot::{Corner, HLine, Legend, Line, LineStyle, Plot, PlotPoints};
 use rust_i18n::t;
 
+use crate::activity::Status;
+use crate::classify::{AppUsage, Category};
 use crate::i18n::Lang;
-use crate::process::AppUsage;
 use crate::sampler::{self, Snapshot};
-use crate::theme::{self, AMBER, BLUE, CARD, CARD_BORDER, CRITICAL_PCT, GREEN, MUTED, RED, TRACK, VIOLET};
+use crate::theme::{
+    self, AMBER, BLUE, CARD, CARD_BORDER, CRITICAL_PCT, CYAN, GREEN, MUTED, RED, SLATE, TRACK, VIOLET,
+};
 
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 /// 10 minutes of history at the sample interval.
 const HISTORY_LEN: usize = 300;
-const TOP_N: usize = 8;
+const TOP_N: usize = 6;
 const PALETTE: [Color32; 4] = [BLUE, VIOLET, GREEN, AMBER];
 const LANG_KEY: &str = "lang";
 
@@ -30,8 +33,28 @@ pub struct App {
     started: Instant,
     /// `[seconds since start, physical %, commit %]`
     history: VecDeque<[f64; 3]>,
-    filter: String,
+    filter: Filter,
     lang: Lang,
+}
+
+/// Row filter of the applications table.
+#[derive(Default)]
+struct Filter {
+    text: String,
+    category: Option<Category>,
+    idle_only: bool,
+}
+
+impl Filter {
+    fn matches(&self, app: &AppUsage, needle: &str) -> bool {
+        (needle.is_empty() || app.name.to_lowercase().contains(needle))
+            && self.category.is_none_or(|c| c == app.category)
+            && (!self.idle_only || is_idle_candidate(app))
+    }
+}
+
+fn is_idle_candidate(app: &AppUsage) -> bool {
+    app.category.idle_candidate() && matches!(app.status, Status::Idle(_))
 }
 
 impl App {
@@ -50,7 +73,7 @@ impl App {
             latest: None,
             started: Instant::now(),
             history: VecDeque::with_capacity(HISTORY_LEN + 1),
-            filter: String::new(),
+            filter: Filter::default(),
             lang,
         }
     }
@@ -97,7 +120,7 @@ impl eframe::App for App {
                 if snap.sys.commit_pct() >= CRITICAL_PCT {
                     commit_alert(ui, snap.sys.commit_pct());
                 }
-                ui.allocate_ui(vec2(ui.available_width(), 340.0), |ui| {
+                ui.allocate_ui(vec2(ui.available_width(), 280.0), |ui| {
                     StripBuilder::new(ui)
                         .size(Size::relative(0.62))
                         .size(Size::remainder())
@@ -300,66 +323,137 @@ fn top_card(ui: &mut Ui, apps: &[AppUsage]) {
     });
 }
 
-fn apps_card(ui: &mut Ui, snap: &Snapshot, filter: &mut String) {
+fn category_color(c: Category) -> Color32 {
+    match c {
+        Category::Application => AMBER,
+        Category::WebApp => CYAN,
+        Category::Browser => BLUE,
+        Category::Service => SLATE,
+        Category::VirtualMachine => VIOLET,
+        Category::Security => GREEN,
+        Category::System => MUTED,
+    }
+}
+
+/// Small rounded label with a tinted background.
+fn chip(ui: &mut Ui, text: &str, color: Color32) {
+    Frame::new()
+        .fill(color.gamma_multiply(0.16))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::symmetric(8, 2))
+        .show(ui, |ui| ui.label(RichText::new(text).size(11.5).color(color)));
+}
+
+fn status_text(app: &AppUsage) -> RichText {
+    if !app.category.idle_candidate() {
+        return RichText::new("—").color(MUTED);
+    }
+    match app.status {
+        Status::Active => RichText::new(t!("activity.active")).color(GREEN),
+        Status::Inactive => RichText::new(t!("activity.inactive")).color(MUTED),
+        Status::Idle(quiet) => RichText::new(t!("activity.idle", min = quiet.as_secs() / 60)).color(AMBER),
+    }
+}
+
+fn apps_card(ui: &mut Ui, snap: &Snapshot, filter: &mut Filter) {
     card(ui, true, |ui| {
+        let (idle_count, idle_bytes) = snap
+            .apps
+            .iter()
+            .filter(|a| is_idle_candidate(a))
+            .fold((0usize, 0u64), |acc, a| (acc.0 + 1, acc.1 + a.private));
+
         ui.horizontal(|ui| {
             card_title(ui, &t!("apps.title"));
             ui.label(RichText::new(t!("apps.entries", count = snap.apps.len())).size(12.0).color(MUTED));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add(egui::TextEdit::singleline(filter).hint_text(t!("apps.filter")).desired_width(220.0));
-                if snap.denied > 0 {
+            if idle_count > 0 {
+                chip(ui, &t!("apps.idle_summary", count = idle_count, size = fmt_bytes(idle_bytes)), AMBER);
+            }
+            if snap.denied > 0 {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(RichText::new(t!("apps.unreadable", count = snap.denied)).size(12.0).color(MUTED));
-                }
-            });
+                });
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut filter.text).hint_text(t!("apps.filter")).desired_width(220.0));
+            let selected = filter.category.map_or_else(|| t!("category.all"), |c| t!(c.label_key()));
+            egui::ComboBox::from_id_salt("category")
+                .selected_text(selected)
+                .width(170.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut filter.category, None, t!("category.all"));
+                    for c in Category::ALL {
+                        ui.selectable_value(&mut filter.category, Some(c), t!(c.label_key()));
+                    }
+                });
+            ui.checkbox(&mut filter.idle_only, t!("apps.idle_only"));
         });
 
-        let needle = filter.to_lowercase();
-        let rows: Vec<&AppUsage> =
-            snap.apps.iter().filter(|a| needle.is_empty() || a.name.to_lowercase().contains(&needle)).collect();
+        let needle = filter.text.to_lowercase();
+        let rows: Vec<&AppUsage> = snap.apps.iter().filter(|a| filter.matches(a, &needle)).collect();
         let total = snap.sys.phys_total as f64;
         // Bars are scaled to the largest application so small differences stay visible.
         let max = snap.apps.first().map_or(1, |a| a.private.max(1)) as f64;
 
-        let right = |ui: &mut Ui, text: String| {
+        let right = |ui: &mut Ui, text: RichText| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.label(text));
         };
         TableBuilder::new(ui)
             .striped(true)
             .auto_shrink([false, false])
             .cell_layout(Layout::left_to_right(Align::Center))
-            .column(Column::remainder().at_least(220.0))
-            .column(Column::exact(90.0))
+            .column(Column::remainder().at_least(160.0))
+            .column(Column::exact(150.0))
+            .column(Column::exact(80.0))
+            .column(Column::exact(70.0))
+            .column(Column::exact(100.0))
             .column(Column::exact(110.0))
             .column(Column::exact(120.0))
-            .column(Column::exact(210.0))
+            .column(Column::exact(170.0))
             .header(26.0, |mut h| {
-                h.col(|ui| {
-                    ui.label(RichText::new(t!("col.name")).color(MUTED));
-                });
-                for key in ["col.processes", "col.private", "col.working_set"] {
+                for (key, align_right) in [
+                    ("col.name", false),
+                    ("col.category", false),
+                    ("col.processes", true),
+                    ("col.cpu", true),
+                    ("col.private", true),
+                    ("col.working_set", true),
+                ] {
                     h.col(|ui| {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(RichText::new(t!(key)).color(MUTED))
-                        });
+                        let text = RichText::new(t!(key)).color(MUTED);
+                        if align_right {
+                            right(ui, text);
+                        } else {
+                            ui.label(text);
+                        }
                     });
                 }
                 h.col(|ui| {
-                    ui.add_space(12.0);
+                    ui.add_space(16.0);
+                    ui.label(RichText::new(t!("col.status")).color(MUTED));
+                });
+                h.col(|ui| {
                     ui.label(RichText::new(t!("col.share")).color(MUTED));
                 });
             })
             .body(|body| {
-                body.rows(28.0, rows.len(), |mut row| {
+                body.rows(30.0, rows.len(), |mut row| {
                     let a = rows[row.index()];
                     row.col(|ui| {
                         ui.label(&a.name);
                     });
-                    row.col(|ui| right(ui, a.count.to_string()));
-                    row.col(|ui| right(ui, fmt_bytes(a.private)));
-                    row.col(|ui| right(ui, fmt_bytes(a.working_set)));
+                    row.col(|ui| chip(ui, &t!(a.category.label_key()), category_color(a.category)));
+                    row.col(|ui| right(ui, RichText::new(a.count.to_string())));
+                    row.col(|ui| right(ui, RichText::new(format!("{:.1}%", a.cpu_pct))));
+                    row.col(|ui| right(ui, RichText::new(fmt_bytes(a.private))));
+                    row.col(|ui| right(ui, RichText::new(fmt_bytes(a.working_set))));
+                    row.col(|ui| {
+                        ui.add_space(16.0);
+                        ui.label(status_text(a));
+                    });
                     row.col(|ui| {
                         let share = a.private as f64 / total;
-                        ui.add_space(12.0);
                         ui.label(RichText::new(format!("{:>4.1}%", share * 100.0)).size(12.0).color(MUTED));
                         meter(ui, a.private as f64 / max, BLUE);
                     });
@@ -367,3 +461,4 @@ fn apps_card(ui: &mut Ui, snap: &Snapshot, filter: &mut String) {
             });
     });
 }
+

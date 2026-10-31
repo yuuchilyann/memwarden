@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 
-use crate::process::{self, AppUsage};
+use crate::activity::Tracker;
+use crate::classify::{self, AppUsage};
+use crate::process::{self, Collector};
 use crate::system::{self, SystemMemory};
 
 pub struct Snapshot {
@@ -22,9 +24,14 @@ pub fn spawn(ctx: egui::Context, interval: Duration) -> Receiver<Snapshot> {
     thread::Builder::new()
         .name("sampler".into())
         .spawn(move || {
+            let mut collector = Collector::default();
+            let mut tracker = Tracker::new();
             loop {
-                if let (Ok(sys), Ok((apps, denied))) = (system::query(), process::grouped()) {
-                    let snap = Snapshot { taken: Instant::now(), sys, apps, denied };
+                if let (Ok(sys), Ok(procs)) = (system::query(), collector.list()) {
+                    let now = Instant::now();
+                    let (mut apps, denied) = classify::group(&procs);
+                    tracker.update(&procs, &mut apps, process::foreground_pid(), now);
+                    let snap = Snapshot { taken: now, sys, apps, denied };
                     if tx.send(snap).is_err() {
                         break; // UI closed
                     }

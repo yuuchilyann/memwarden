@@ -36,3 +36,23 @@ col.processes: "프로세스"
 col.private: "전용 메모리"
 col.working_set: "작업 집합"
 col.share: "물리 메모리 점유율"
+
+apps.idle_summary: "유휴 %{count}개 · %{size}"
+apps.idle_only: "유휴만 표시"
+
+col.category: "범주"
+col.cpu: "CPU"
+col.status: "상태"
+
+category.all: "모든 범주"
+category.application: "일반 앱"
+category.webapp: "웹 기반 앱"
+category.browser: "브라우저"
+category.service: "백그라운드 서비스"
+category.vm: "가상 머신"
+category.security: "보안"
+category.system: "시스템"
+
+activity.active: "사용 중"
+activity.inactive: "비활성"
+activity.idle: "유휴 %{min}분"

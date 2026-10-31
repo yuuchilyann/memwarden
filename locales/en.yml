@@ -36,3 +36,23 @@ col.processes: "Processes"
 col.private: "Private"
 col.working_set: "Working set"
 col.share: "Share of RAM (private)"
+
+apps.idle_summary: "Idle: %{count} apps · %{size}"
+apps.idle_only: "Idle only"
+
+col.category: "Category"
+col.cpu: "CPU"
+col.status: "Status"
+
+category.all: "All categories"
+category.application: "Application"
+category.webapp: "Web-based app"
+category.browser: "Browser"
+category.service: "Background service"
+category.vm: "Virtual machine"
+category.security: "Security"
+category.system: "System"
+
+activity.active: "Active"
+activity.inactive: "Inactive"
+activity.idle: "Idle %{min} min"

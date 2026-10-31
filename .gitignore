@@ -1,5 +1,7 @@
 # ---- Rust build output ----
 /target/
+# Release packages from scripts/package.ps1
+/dist/
 **/*.rs.bk
 *.pdb
 

@@ -288,6 +288,7 @@ mod tests {
         if outcome != Outcome::Closed {
             let _ = child.kill();
         }
+        let _ = child.wait();
         assert_eq!(outcome, Outcome::Closed);
         assert!(!is_running(inst));
     }

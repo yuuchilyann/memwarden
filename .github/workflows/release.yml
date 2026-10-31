@@ -1,0 +1,24 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the package and creates a draft
+# release; the owner reviews it and publishes it on GitHub.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build and package
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = ./scripts/package.ps1 -Tag $env:TAG
+          gh release create $env:TAG $zip "$zip.sha256" --draft --title "memwarden $env:TAG" --generate-notes

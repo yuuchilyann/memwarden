@@ -132,5 +132,6 @@ mod tests {
         // A different start time means another process: left alone.
         assert_eq!(trim_instances(&[(pid, created + 1)]), (0, 1));
         let _ = child.kill();
+        let _ = child.wait();
     }
 }

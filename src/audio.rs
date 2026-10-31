@@ -42,10 +42,10 @@ fn collect(pids: &mut HashSet<u32>) -> windows::core::Result<()> {
                     continue;
                 }
                 // Fails for sessions spanning several processes; those are skipped.
-                if let Ok(pid) = session.cast::<IAudioSessionControl2>().and_then(|s| s.GetProcessId()) {
-                    if pid != 0 {
-                        pids.insert(pid);
-                    }
+                if let Ok(pid) = session.cast::<IAudioSessionControl2>().and_then(|s| s.GetProcessId())
+                    && pid != 0
+                {
+                    pids.insert(pid);
                 }
             }
         }

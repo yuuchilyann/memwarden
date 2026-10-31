@@ -6,6 +6,12 @@
   "default_locale": "en",
   "minimum_chrome_version": "121",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmLyW+bS7RS7sBS2NM3yJgSbVvEScbyUmnT0TiP6nyB1A9g/9W0pqZJdg2l9NPxwUAU/Eo5TVLGVfphcnjHMWS4wQ384x3XmtMiTSqQa9seebLY/8KO0k+j2q1GypSMHmEk8IdCaDS1AbfPg/U0bJYfVlrdi8uMDS8zliG54Ni/iXUjWDlAQmlyifEoGvqs7IuR6sEOvV+R9kZaIJzNzQ8sl7EKqpkiRZbRI7cvmRiS8e/l18ZLEOLMulyxI4mESzHuBambKj14Mt+9W0TrxjuQh6zyeyRYT84TORwxs6EeKfH7NLeMkMfdG8sN+SreWNRXKnqJh4Uqh2RcCeXeJZ4QIDAQAB",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "permissions": ["tabs", "nativeMessaging", "storage"],
   "background": {
     "service_worker": "background.js",
@@ -13,6 +19,10 @@
   },
   "action": {
     "default_title": "__MSG_extName__",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    },
     "default_popup": "popup.html"
   }
 }

@@ -147,7 +147,7 @@ pub fn group(procs: &[ProcessInfo]) -> (Vec<AppUsage>, usize) {
             g.app
         })
         .collect();
-    apps.sort_by(|a, b| b.private.cmp(&a.private));
+    apps.sort_by_key(|a| std::cmp::Reverse(a.private));
     (apps, denied)
 }
 

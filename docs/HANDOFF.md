@@ -6,7 +6,8 @@
 
 **目前狀態（2026-10-31）**：M0–M5 完成；M6（瀏覽器擴充功能）、M7（關閉建議、分頁檔資訊）與
 M8（記憶體成長追蹤）程式完成，部分實機驗證待做（PLAN.md 7.10、8.9、9.8；M8 需要開著數小時觀察並調整門檻）。
-**下一步：M9 發佈**。
+**目前進行 M9 發佈**（PLAN.md 第 10 節）：CI、圖示、打包、README 已完成，
+待專案擁有者建立 GitHub repo 並推送。
 
 ## 1. 專案概要
 
@@ -37,6 +38,7 @@ Cargo workspace：根目錄是 memwarden，`host/` 是 Native Messaging host（`
 cargo build                     # 偵錯版，會顯示主控台
 cargo build --release           # 發佈版，無主控台視窗（LTO，約 4–7 分鐘）
 .\target\release\memwarden.exe
+.\scripts\package.ps1           # 建置發佈版並打包 dist\memwarden-<版本>-windows-x64.zip（含 .sha256）
 $env:MEMWARDEN_LANG = "ja"; cargo run   # 強制指定語言（zh-TW / en / ja / ko）
 ```
 
@@ -99,6 +101,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `extension/manifest.json` | Chrome MV3 擴充功能；`key` 讓未封裝載入時 ID 固定為 `jmngjfeoiaihgaabjklldhfmnaejnkga` |
 | `extension/tabs.js` | 可丟棄候選判定、分頁計數、丟棄（service worker 與彈出視窗共用） |
 | `extension/background.js` | service worker：維持 Native Messaging 連線、回報計數、執行 memwarden 送來的丟棄請求 |
+| `extension/icons/` | 擴充功能圖示（由 `scripts/make-icon.py` 產生） |
 | `extension/popup.*` | 彈出視窗：連線狀態、閒置門檻、分頁清單、逐一丟棄與「丟棄閒置分頁」（需確認） |
 | `extension/_locales/*/messages.json` | 擴充功能的四語系文字 |
 | `extension/tests/` | node 測試（打包時排除） |
@@ -106,6 +109,11 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `src/i18n.rs` | 語言列舉、偵測 Windows 顯示語言 |
 | `locales/*.yml` | 介面文字（每語言一檔，缺字回退英文） |
 | `scripts/capture-window.ps1` | 擷取 memwarden 視窗截圖（驗證 UI 用） |
+| `scripts/package.ps1` | 建置發佈版並打包 zip（CI 的 release workflow 也用它）；標籤版本須等於 `Cargo.toml` |
+| `scripts/make-icon.py` | 繪製圖示（Python + Pillow），只在修改圖示時執行，產物已提交 |
+| `assets/` | `memwarden.ico`（執行檔）、`icon-256.png`（視窗） |
+| `build.rs` | 把圖示與版本資訊嵌入 memwarden.exe（`embed-resource`） |
+| `.github/workflows/` | `ci.yml`：build、clippy（`-D warnings`）、test、擴充功能測試；`release.yml`：推送 `v*` 標籤時建立草稿 Release |
 
 ## 5. 開發慣例
 
@@ -155,7 +163,9 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 
 ## 7. 驗證方式
 
-1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告（目前 memwarden 45 項 + host 10 項）。
+1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告（目前 memwarden 45 項 + host 10 項），
+   `cargo clippy --all-targets -- -D warnings` 也要通過（CI 會檢查）。
+   CI 上略過需要互動式桌面的 `closes_a_real_window`，所以 `close.rs` 的視窗測試只在本機執行。
    純邏輯：`classify.rs` 分類與 WebView2 歸屬、`activity.rs` 狀態轉換、`bridge.rs` 訊息處理、
    `close.rs` 建議條件與結果判定、`pagefile.rs` 設定解析與最大值、`growth.rs` 底線彙總與成長判定。
    會呼叫 Win32 的測試只操作測試自己啟動的子程序：`priority.rs`、`trim.rs`（`cmd.exe`），

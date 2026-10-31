@@ -35,7 +35,7 @@
 | **M6** | **瀏覽器配套擴充功能：分頁閒置概況與分頁丟棄（Native Messaging）** | 🚧 程式完成，Chrome 已實機驗證；Edge、多設定檔、自身占用待驗證（見第 7 節） | |
 | M7 | 關閉建議（閒置很久的大型程式，使用者確認後以 `WM_CLOSE` 關閉）；分頁檔資訊與調整入口 | 🚧 程式完成，待實機確認（見第 8 節） | |
 | M8 | 記憶體成長追蹤：記錄各程式數小時的私有記憶體底線，標示持續成長的程式並建議重新開啟 | 🚧 程式完成，待實機觀察數小時調整門檻（見第 9 節） | |
-| M9 | 發佈：GitHub repo、CI（build + clippy）、Release 執行檔、應用程式圖示 | ⏳ 未開始 | |
+| M9 | 發佈：GitHub repo、CI（build + clippy）、Release 執行檔、應用程式圖示 | 🚧 進行中（見第 10 節） | |
 
 ## 4. M3 閒置程序偵測與分類（詳細規格）
 
@@ -430,7 +430,7 @@ M4／M5 只影響實體記憶體；真正會讓程式當機的是 Commit，而�
   它不開啟具寫入權限的程序控制代碼，只用 `PROCESS_QUERY_LIMITED_INFORMATION` 確認程序實例與是否已結束。
 - `pagefile.rs` 只讀 HKLM 登錄、檔案大小與磁碟空間。「調整分頁檔…」只啟動 Windows 內建的設定程式
   （`%SystemRoot%\System32\SystemPropertiesPerformance.exe`），不帶參數。
-- 第 1 節目標、第 2 節原則、第 11 節非目標同步修改（關閉是建議、由使用者逐一確認，不是強制結束）。
+- 第 1 節目標、第 2 節原則、第 12 節非目標同步修改（關閉是建議、由使用者逐一確認，不是強制結束）。
 - CLAUDE.md 與 HANDOFF.md 的寫入界線加上 `close.rs`。
 
 ### 8.8 測試與驗證
@@ -453,7 +453,7 @@ M4／M5 只影響實體記憶體；真正會讓程式當機的是 Commit，而�
 - [x] 分頁檔：`pagefile.rs` 讀取與解析、Commit 卡片說明、警示文字、「調整分頁檔…」按鈕；四語系（各 6 個字串）
       （5 項測試：`PagingFiles` 解析、`?:` 對應、系統管理最大值、可能的上限，以及讀取本機設定。
       警示只在 Commit ≥ 85% 時出現，自訂大小時的按鈕與文字待實機確認）
-- [x] 規則與文件：第 1、2、11 節（當時編號為 10），CLAUDE.md、HANDOFF.md 寫入界線
+- [x] 規則與文件：第 1、2、12 節（當時編號為 10），CLAUDE.md、HANDOFF.md 寫入界線
 - [ ] 實機驗證（見 8.8）
       - [x] 標題「建議關閉 N 個 · 約 X GB」、狀態欄紅色「建議關閉」；LINE、OneDrive（只剩系統匣圖示）的「關閉」按鈕停用（2026-10-31）。
         實測後改為不建議同步程式、標題分開計數系統匣程式
@@ -538,7 +538,69 @@ Java、.NET 等有 GC 的程式會先長到堆積上限才回收，可能被誤�
 - [ ] 實機觀察數小時並調整門檻（同時量測歷史資料對自身占用的影響）
 - [x] 文件：HANDOFF 檔案表與驗證方式
 
-## 10. 決策紀錄
+## 10. M9 發佈（規格）
+
+### 10.1 範圍
+
+- **CI**（GitHub Actions，`windows-latest`）：每次 push 與 pull request 執行
+  `cargo build`、`cargo clippy --all-targets -- -D warnings`、`cargo test`、擴充功能的 node 測試。
+- **Release**：推送 `v*` 標籤時建置發佈版、打包 zip，建立 GitHub Release（草稿，由專案擁有者確認後發佈）。
+- **應用程式圖示**：執行檔圖示（檔案總管、捷徑）與視窗／工作列圖示。
+- **README**：功能（M3–M8）、安裝、瀏覽器擴充功能、隱私、`tabs` 權限警告的原因。
+- **GitHub repo**：由專案擁有者決定名稱與公開時機；建立 repo 與第一次推送需擁有者確認。
+
+不做（本階段）：安裝程式、程式碼簽章（未簽章的執行檔會出現 SmartScreen 警告，README 說明）、
+Chrome 線上應用程式商店上架（需要開發人員帳號，之後另行處理；上架後擴充功能 ID 會改變，見 7.3）、
+自動更新（違反不連網原則）。
+
+### 10.2 發佈檔案
+
+`memwarden-<版本>-windows-x64.zip`：
+
+```
+memwarden.exe
+memwarden-host.exe        與 memwarden.exe 放在同一個資料夾（瀏覽器整合需要）
+extension\                未封裝的擴充功能（不含 tests\），供「載入未封裝項目」使用
+README.md
+LICENSE-MIT
+LICENSE-APACHE
+```
+
+- 打包由 `scripts/package.ps1` 進行，CI 與本機使用同一份腳本，本機也能先確認 zip 內容。
+- 標籤版本必須等於 `Cargo.toml` 的版本，不一致時打包失敗，避免發佈錯誤的版本號。
+- 只放建置產物、擴充功能、文件與授權；不放截圖、`target\` 其他檔案或任何本機資料。
+
+### 10.3 圖示
+
+- 圖樣：深色圓角方塊上的藍色盾牌（warden），盾牌內三條高低不同的長條（記憶體用量）。
+  16 px 也要看得出輪廓，所以不用細線與文字。配色取自 `theme.rs`。
+- `scripts/make-icon.py`（Python + Pillow）以 4 倍超取樣繪製，產生 `assets/memwarden.ico`（16–256 px）、
+  `assets/icon-256.png` 與擴充功能的 `extension/icons/icon-{16,32,48,128}.png`。
+  32 px 以下不畫外框、長條加寬。只有修改圖示時才需要執行，產物提交到 repo，建置不需要 Python。
+- 執行檔圖示：`build.rs` 在 `OUT_DIR` 產生 `.rc`（圖示與版本資訊，版本取自 `Cargo.toml`），
+  以 `embed-resource` 編譯嵌入（MSVC 工具鏈已含 `rc.exe`）。工作管理員的「描述」因此顯示 memwarden。
+- 視窗圖示：`main.rs` 以 `eframe::icon_data::from_png_bytes` 載入 `icon-256.png`
+  （eframe 原本就會解碼它自己的預設圖示，不增加相依）。
+
+### 10.4 CI 注意事項
+
+- `close.rs` 的 `closes_a_real_window` 需要互動式桌面才能顯示 WinForms 視窗，在 CI 上略過（`--skip`）；
+  其餘 Win32 測試只操作測試自己啟動的子程序，可以在 CI 執行。
+- clippy 以 `-D warnings` 執行，所以既有的 clippy 警告要先修正。
+
+### 10.5 工作項目
+
+- [x] 規格（本節）
+- [x] 修正既有 clippy 警告（`audio.rs` let chain、`classify.rs` `sort_by_key`、測試中的子程序補上 `wait`）
+- [x] CI workflow（`.github/workflows/ci.yml`：Rust 在 `windows-latest`，擴充功能測試在 `ubuntu-latest`）
+- [x] 圖示：產生腳本、`.ico`、執行檔與視窗圖示、擴充功能圖示（已確認執行檔的圖示與版本資訊）
+- [x] `scripts/package.ps1` 與 release workflow（`.github/workflows/release.yml`，建立草稿 Release）
+- [x] README 更新
+- [ ] 建立 GitHub repo、推送、確認 CI 通過（需擁有者確認）
+- [ ] 第一次 Release（需擁有者確認）
+- [ ] 發佈版自身占用量測（介紹網頁前）
+
+## 11. 決策紀錄
 
 | 日期 | 決策 | 理由 |
 |---|---|---|
@@ -566,15 +628,18 @@ Java、.NET 等有 GC 的程式會先長到堆積上限才回收，可能被誤�
 | 2026-10-31 | 成長判定用每分鐘最低值（底線），不用平均 | GC 與暫時配置會造成尖峰；洩漏表現為底線上升 |
 | 2026-10-31 | M8 只記錄一般應用程式與 Web 技術應用；被標示的程式才把底線序列帶到 UI | 其他類別不會被判定，不必占記憶體；每 2 秒複製全部群組的 6 小時序列是浪費 |
 | 2026-10-31 | M8 不自動重新開啟程式 | 重新開啟需要命令列參數（不讀取、不儲存），Store 應用程式也無法用路徑啟動 |
+| 2026-10-31 | 圖示以腳本繪製幾何圖形（`scripts/make-icon.py`），不用影像生成 | 16 px 仍要清楚；可重現、可修改，授權單純。介紹網頁的大尺寸主視覺另行製作 |
+| 2026-10-31 | Release 由 CI 建立草稿，擁有者確認後才發佈 | 發佈是對外動作；先檢查 zip 內容與說明 |
+| 2026-10-31 | 擴充功能先以「載入未封裝項目」隨 zip 發佈，商店上架延後 | 上架需要開發人員帳號，且 ID 會改變（見 7.3） |
 
-## 11. 非目標
+## 12. 非目標
 
 - 強制結束程序（`TerminateProcess`）、自動關閉程式、一次關閉全部（M7 只在使用者逐一確認後送出 `WM_CLOSE`）
 - 直接修改分頁檔設定（M7 只開啟 Windows 的設定視窗）
 - 「一鍵清理記憶體」這類全面修剪（會造成卡頓且無法降低 Commit）
 - 讀取其他程序的記憶體內容
 
-## 12. 待後續階段處理的風險
+## 13. 待後續階段處理的風險
 
 - ~~M4／M5 須排除正在播放音訊的程式~~：已於 M5 以 Core Audio 偵測解決（見 6.1）。
 - 合併多個程序的音訊工作階段（`GetProcessId` 失敗者）目前會被略過；若發現漏判的播放程式，需改以工作階段識別字串比對。

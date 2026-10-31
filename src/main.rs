@@ -28,9 +28,12 @@ mod theme;
 mod trim;
 
 fn main() -> eframe::Result {
+    // The same picture as the executable's icon (embedded by build.rs).
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png")).expect("icon is a valid PNG");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("memwarden")
+            .with_icon(icon)
             .with_inner_size([1280.0, 820.0])
             .with_min_inner_size([1140.0, 680.0]),
         ..Default::default()

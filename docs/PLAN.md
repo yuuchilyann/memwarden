@@ -596,7 +596,9 @@ LICENSE-APACHE
 - [x] 圖示：產生腳本、`.ico`、執行檔與視窗圖示、擴充功能圖示（已確認執行檔的圖示與版本資訊）
 - [x] `scripts/package.ps1` 與 release workflow（`.github/workflows/release.yml`，建立草稿 Release）
 - [x] README 更新
-- [ ] 建立 GitHub repo、推送、確認 CI 通過（需擁有者確認）
+- [x] 建立 GitHub repo、推送、確認 CI 通過（2026-10-31 公開於 https://github.com/yuuchilyann/memwarden；
+      推送前檢查全部歷史沒有金鑰、使用者路徑、SID、電腦名稱或截圖。第一次 CI 發現 `priority.rs` 測試假設子程序的
+      記憶體優先權不是 Low，GitHub runner 上會繼承 Low，已修正）
 - [ ] 第一次 Release（需擁有者確認）
 - [ ] 發佈版自身占用量測（介紹網頁前）
 

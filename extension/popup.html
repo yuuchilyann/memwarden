@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1 data-i18n="extName"></h1>
+    <span id="status" class="status"></span>
+  </header>
+
+  <section class="controls">
+    <label>
+      <span data-i18n="thresholdLabel"></span>
+      <select id="threshold"></select>
+    </label>
+    <div id="bulk" class="bulk">
+      <button id="discard-idle"></button>
+    </div>
+    <div id="confirm" class="confirm" hidden>
+      <p id="confirm-text"></p>
+      <button id="confirm-yes" class="danger" data-i18n="confirmYes"></button>
+      <button id="confirm-no" data-i18n="cancel"></button>
+    </div>
+    <p id="result" class="result" hidden></p>
+  </section>
+
+  <p id="summary" class="summary"></p>
+  <ul id="tabs" class="tabs"></ul>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

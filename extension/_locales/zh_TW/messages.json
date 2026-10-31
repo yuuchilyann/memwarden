@@ -1,0 +1,112 @@
+{
+  "extName": {
+    "message": "memwarden"
+  },
+  "extDescription": {
+    "message": "memwarden 記憶體儀表板的配套擴充功能：顯示閒置分頁，並依你的指示丟棄。只在本機運作。"
+  },
+  "thresholdLabel": {
+    "message": "閒置門檻"
+  },
+  "summary": {
+    "message": "分頁 $TOTAL$ · 已丟棄 $DISCARDED$ · 閒置 $CANDIDATES$",
+    "placeholders": {
+      "total": {
+        "content": "$1"
+      },
+      "discarded": {
+        "content": "$2"
+      },
+      "candidates": {
+        "content": "$3"
+      }
+    }
+  },
+  "discardIdle": {
+    "message": "丟棄閒置分頁 ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmText": {
+    "message": "要丟棄 $COUNT$ 個閒置分頁嗎？分頁仍留在分頁列，點一下就會重新載入。未儲存的表單內容可能遺失。",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmYes": {
+    "message": "確定丟棄"
+  },
+  "cancel": {
+    "message": "取消"
+  },
+  "resultText": {
+    "message": "已丟棄 $DISCARDED$ 個分頁 · 略過 $SKIPPED$ 個",
+    "placeholders": {
+      "discarded": {
+        "content": "$1"
+      },
+      "skipped": {
+        "content": "$2"
+      }
+    }
+  },
+  "statusConnecting": {
+    "message": "連線中…"
+  },
+  "statusConnected": {
+    "message": "● 已連線 memwarden"
+  },
+  "statusNoMemwarden": {
+    "message": "memwarden 未執行"
+  },
+  "statusNoHost": {
+    "message": "memwarden-host 尚未註冊"
+  },
+  "idleFor": {
+    "message": "閒置 $DURATION$",
+    "placeholders": {
+      "duration": {
+        "content": "$1"
+      }
+    }
+  },
+  "durationMinutes": {
+    "message": "$N$ 分鐘",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "durationHours": {
+    "message": "$N$ 小時",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "activeTab": {
+    "message": "作用中"
+  },
+  "discardedTab": {
+    "message": "已丟棄"
+  },
+  "audibleTab": {
+    "message": "播放聲音中"
+  },
+  "pinnedTab": {
+    "message": "已釘選"
+  },
+  "discardButton": {
+    "message": "丟棄"
+  },
+  "untitled": {
+    "message": "（無標題）"
+  }
+}

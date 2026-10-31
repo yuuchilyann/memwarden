@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "description": "__MSG_extDescription__",
+  "version": "0.1.0",
+  "default_locale": "en",
+  "minimum_chrome_version": "121",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmLyW+bS7RS7sBS2NM3yJgSbVvEScbyUmnT0TiP6nyB1A9g/9W0pqZJdg2l9NPxwUAU/Eo5TVLGVfphcnjHMWS4wQ384x3XmtMiTSqQa9seebLY/8KO0k+j2q1GypSMHmEk8IdCaDS1AbfPg/U0bJYfVlrdi8uMDS8zliG54Ni/iXUjWDlAQmlyifEoGvqs7IuR6sEOvV+R9kZaIJzNzQ8sl7EKqpkiRZbRI7cvmRiS8e/l18ZLEOLMulyxI4mESzHuBambKj14Mt+9W0TrxjuQh6zyeyRYT84TORwxs6EeKfH7NLeMkMfdG8sN+SreWNRXKnqJh4Uqh2RcCeXeJZ4QIDAQAB",
+  "permissions": ["tabs", "nativeMessaging", "storage"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "__MSG_extName__",
+    "default_popup": "popup.html"
+  }
+}

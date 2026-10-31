@@ -1,0 +1,106 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1c2230;
+  --muted: #6b7385;
+  --line: #e3e6ec;
+  --accent: #3b6fd8;
+  --ok: #1f9d63;
+  --warn: #c27c0e;
+  --danger: #c2413b;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161b26;
+    --fg: #e6e9ef;
+    --muted: #8a93a6;
+    --line: #2a3242;
+    --accent: #6c9cff;
+    --ok: #3ccf8e;
+    --warn: #f0b14a;
+    --danger: #ff7a73;
+  }
+}
+
+body {
+  width: 380px;
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 system-ui, "Segoe UI", "Microsoft JhengHei UI", "Yu Gothic UI", "Malgun Gothic", sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.status { font-size: 12px; color: var(--muted); }
+.status.connected { color: var(--ok); }
+.status.no_host { color: var(--warn); }
+
+.controls {
+  margin: 10px 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+}
+
+label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+button, select {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.45; cursor: default; }
+button.danger { border-color: var(--danger); color: var(--danger); }
+.bulk button { width: 100%; }
+
+.confirm p { margin: 0 0 6px; }
+.result { margin: 0; color: var(--ok); }
+.summary { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+
+.tabs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.tabs li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs .title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tabs .meta { grid-column: 1; font-size: 11.5px; color: var(--muted); }
+.tabs .meta.candidate { color: var(--warn); }
+.tabs button { grid-column: 2; grid-row: 1 / span 2; padding: 2px 8px; font-size: 12px; }
+.tabs li.discarded .title { color: var(--muted); }

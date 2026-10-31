@@ -1,0 +1,112 @@
+{
+  "extName": {
+    "message": "memwarden"
+  },
+  "extDescription": {
+    "message": "Companion to the memwarden memory dashboard: shows idle tabs and discards them on request. Works locally only."
+  },
+  "thresholdLabel": {
+    "message": "Idle threshold"
+  },
+  "summary": {
+    "message": "$TOTAL$ tabs · $DISCARDED$ discarded · $CANDIDATES$ idle",
+    "placeholders": {
+      "total": {
+        "content": "$1"
+      },
+      "discarded": {
+        "content": "$2"
+      },
+      "candidates": {
+        "content": "$3"
+      }
+    }
+  },
+  "discardIdle": {
+    "message": "Discard idle tabs ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmText": {
+    "message": "Discard $COUNT$ idle tabs? They stay in the tab strip and reload when clicked. Unsaved form input may be lost.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmYes": {
+    "message": "Discard"
+  },
+  "cancel": {
+    "message": "Cancel"
+  },
+  "resultText": {
+    "message": "Discarded $DISCARDED$ tabs · $SKIPPED$ skipped",
+    "placeholders": {
+      "discarded": {
+        "content": "$1"
+      },
+      "skipped": {
+        "content": "$2"
+      }
+    }
+  },
+  "statusConnecting": {
+    "message": "Connecting…"
+  },
+  "statusConnected": {
+    "message": "● Connected to memwarden"
+  },
+  "statusNoMemwarden": {
+    "message": "memwarden is not running"
+  },
+  "statusNoHost": {
+    "message": "memwarden-host is not registered"
+  },
+  "idleFor": {
+    "message": "Idle $DURATION$",
+    "placeholders": {
+      "duration": {
+        "content": "$1"
+      }
+    }
+  },
+  "durationMinutes": {
+    "message": "$N$ min",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "durationHours": {
+    "message": "$N$ h",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "activeTab": {
+    "message": "Active"
+  },
+  "discardedTab": {
+    "message": "Discarded"
+  },
+  "audibleTab": {
+    "message": "Playing audio"
+  },
+  "pinnedTab": {
+    "message": "Pinned"
+  },
+  "discardButton": {
+    "message": "Discard"
+  },
+  "untitled": {
+    "message": "(untitled)"
+  }
+}

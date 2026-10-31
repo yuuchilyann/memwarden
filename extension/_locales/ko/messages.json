@@ -1,0 +1,112 @@
+{
+  "extName": {
+    "message": "memwarden"
+  },
+  "extDescription": {
+    "message": "메모리 대시보드 memwarden의 확장 프로그램: 유휴 탭을 보여 주고 요청 시 삭제합니다. 로컬에서만 동작합니다."
+  },
+  "thresholdLabel": {
+    "message": "유휴 기준"
+  },
+  "summary": {
+    "message": "탭 $TOTAL$ · 삭제됨 $DISCARDED$ · 유휴 $CANDIDATES$",
+    "placeholders": {
+      "total": {
+        "content": "$1"
+      },
+      "discarded": {
+        "content": "$2"
+      },
+      "candidates": {
+        "content": "$3"
+      }
+    }
+  },
+  "discardIdle": {
+    "message": "유휴 탭 삭제 ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmText": {
+    "message": "유휴 탭 $COUNT$개를 삭제할까요? 탭은 탭 표시줄에 남아 있으며 클릭하면 다시 로드됩니다. 저장하지 않은 양식 입력은 사라질 수 있습니다.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmYes": {
+    "message": "삭제"
+  },
+  "cancel": {
+    "message": "취소"
+  },
+  "resultText": {
+    "message": "탭 $DISCARDED$개 삭제 · $SKIPPED$개 건너뜀",
+    "placeholders": {
+      "discarded": {
+        "content": "$1"
+      },
+      "skipped": {
+        "content": "$2"
+      }
+    }
+  },
+  "statusConnecting": {
+    "message": "연결 중…"
+  },
+  "statusConnected": {
+    "message": "● memwarden에 연결됨"
+  },
+  "statusNoMemwarden": {
+    "message": "memwarden이 실행 중이 아닙니다"
+  },
+  "statusNoHost": {
+    "message": "memwarden-host가 등록되지 않았습니다"
+  },
+  "idleFor": {
+    "message": "유휴 $DURATION$",
+    "placeholders": {
+      "duration": {
+        "content": "$1"
+      }
+    }
+  },
+  "durationMinutes": {
+    "message": "$N$분",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "durationHours": {
+    "message": "$N$시간",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "activeTab": {
+    "message": "활성"
+  },
+  "discardedTab": {
+    "message": "삭제됨"
+  },
+  "audibleTab": {
+    "message": "소리 재생 중"
+  },
+  "pinnedTab": {
+    "message": "고정됨"
+  },
+  "discardButton": {
+    "message": "삭제"
+  },
+  "untitled": {
+    "message": "(제목 없음)"
+  }
+}

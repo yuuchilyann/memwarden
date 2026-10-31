@@ -204,8 +204,17 @@ scripts/register-host.ps1  註冊／解除註冊 host
   `tabs.discard` 失敗（瀏覽器拒絕）時計為「略過」。
 - **i18n**：Chrome 擴充功能只能用自己的 `_locales/{zh_TW,en,ja,ko}/messages.json`（`default_locale: en`），
   語言跟隨瀏覽器介面語言。四個檔案的鍵必須一致。
-- **擴充功能 ID 固定**：`manifest.json` 放公開金鑰（`key`），讓未封裝載入時 ID 固定，host 資訊清單的
-  `allowed_origins` 才能寫死。私鑰 `.pem` 不進 repo（已被 `.gitignore` 排除）。上架商店屬於 M7。
+- **擴充功能 ID 固定**：`manifest.json` 放公開金鑰（`key`），讓未封裝載入時 ID 固定為
+  `jmngjfeoiaihgaabjklldhfmnaejnkga`，host 資訊清單的 `allowed_origins` 才能寫死。
+  載入未封裝擴充功能只需要公開金鑰，因此產生後**私鑰已直接刪除**，沒有需要保管的秘密。
+  上架商店（M7）時改用商店核發的 `key`，ID 會改變，註冊腳本要一併更新。
+- **不載入 favicon**：`favIconUrl` 會從網路載入圖示，違反「不連網」，所以彈出視窗只顯示標題文字。
+- **實作檔案**：`tabs.js`（候選判定、計數、丟棄，service worker 與彈出視窗共用）、`background.js`、
+  `popup.html/css/js`。連線狀態有四種：連線中、`memwarden-host` 未註冊（host 沒送出任何訊息就斷線）、
+  memwarden 未執行、已連線。host 斷線後，下一次分頁事件或開啟彈出視窗時重試（最多每 60 秒一次）。
+  已連線時每 60 秒重送一次概況，因為分頁只是變舊也會變成候選。
+- **測試**：`node --test "extension/tests/*.test.mjs"`：候選判定、計數、四語系鍵與 placeholder 一致、
+  程式用到的訊息都存在且沒有多餘的訊息。打包上架時要排除 `tests/`。
 
 ### 7.4 隱私界線
 
@@ -283,7 +292,9 @@ JSON 格式錯誤或必要欄位缺漏也會斷線。
 - [x] Cargo workspace 與 `host/` 骨架；訊框讀寫與父瀏覽器查找（10 項單元測試；
       另以暫時的 PowerShell pipe 伺服器手動驗證雙向轉送、memwarden 未執行／中途關閉時的狀態通知、stdin 關閉時結束）
 - [x] `bridge.rs`：named pipe 伺服器、DACL、訊息解析（5 項單元測試；host 函式庫另有 server／client 實際收發測試）
-- [ ] 擴充功能：manifest、service worker、候選判定、彈出視窗、四語系 `_locales`
+- [x] 擴充功能：manifest、service worker、候選判定、彈出視窗、四語系 `_locales`
+      （6 項 node 測試；彈出視窗以假的 `chrome` 物件在瀏覽器中渲染，確認四語系、三種連線狀態與確認後丟棄的流程。
+      尚未在真實 Chrome／Edge 載入，需先完成註冊腳本）
 - [x] memwarden 介面：瀏覽器列的分頁概況、丟棄按鈕與結果、四語系 `locales/*.yml`
       （以改名為 `chrome.exe` 的 PowerShell 扮演瀏覽器，透過 host 送出概況，截圖確認顯示；按下丟棄的流程待擴充功能完成後實機驗證）
 - [ ] `register-host.ps1`（含 `-Unregister`）

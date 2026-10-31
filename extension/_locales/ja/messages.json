@@ -1,0 +1,112 @@
+{
+  "extName": {
+    "message": "memwarden"
+  },
+  "extDescription": {
+    "message": "メモリーダッシュボード memwarden の拡張機能：アイドルタブを表示し、指示に応じて破棄します。ローカルでのみ動作します。"
+  },
+  "thresholdLabel": {
+    "message": "アイドルのしきい値"
+  },
+  "summary": {
+    "message": "タブ $TOTAL$ · 破棄済み $DISCARDED$ · アイドル $CANDIDATES$",
+    "placeholders": {
+      "total": {
+        "content": "$1"
+      },
+      "discarded": {
+        "content": "$2"
+      },
+      "candidates": {
+        "content": "$3"
+      }
+    }
+  },
+  "discardIdle": {
+    "message": "アイドルタブを破棄 ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmText": {
+    "message": "アイドルタブ $COUNT$ 件を破棄しますか？タブはタブバーに残り、クリックすると再読み込みされます。未保存のフォーム入力は失われることがあります。",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmYes": {
+    "message": "破棄する"
+  },
+  "cancel": {
+    "message": "キャンセル"
+  },
+  "resultText": {
+    "message": "$DISCARDED$ 件のタブを破棄 · $SKIPPED$ 件をスキップ",
+    "placeholders": {
+      "discarded": {
+        "content": "$1"
+      },
+      "skipped": {
+        "content": "$2"
+      }
+    }
+  },
+  "statusConnecting": {
+    "message": "接続中…"
+  },
+  "statusConnected": {
+    "message": "● memwarden に接続済み"
+  },
+  "statusNoMemwarden": {
+    "message": "memwarden が起動していません"
+  },
+  "statusNoHost": {
+    "message": "memwarden-host が登録されていません"
+  },
+  "idleFor": {
+    "message": "アイドル $DURATION$",
+    "placeholders": {
+      "duration": {
+        "content": "$1"
+      }
+    }
+  },
+  "durationMinutes": {
+    "message": "$N$ 分",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "durationHours": {
+    "message": "$N$ 時間",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "activeTab": {
+    "message": "アクティブ"
+  },
+  "discardedTab": {
+    "message": "破棄済み"
+  },
+  "audibleTab": {
+    "message": "音声再生中"
+  },
+  "pinnedTab": {
+    "message": "固定"
+  },
+  "discardButton": {
+    "message": "破棄"
+  },
+  "untitled": {
+    "message": "（無題）"
+  }
+}

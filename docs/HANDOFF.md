@@ -68,6 +68,12 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `host/src/frame.rs` | 訊框格式（4 位元組長度 + JSON，上限 64 KB），host 與 bridge 共用 |
 | `host/src/pipe.rs` | named pipe 兩端（overlapped I/O）、只限目前使用者的 DACL |
 | `host/src/browser.rs` | 從 PID 沿父程序往上找出 Chrome／Edge 瀏覽器程序 |
+| `extension/manifest.json` | Chrome MV3 擴充功能；`key` 讓未封裝載入時 ID 固定為 `jmngjfeoiaihgaabjklldhfmnaejnkga` |
+| `extension/tabs.js` | 可丟棄候選判定、分頁計數、丟棄（service worker 與彈出視窗共用） |
+| `extension/background.js` | service worker：維持 Native Messaging 連線、回報計數、執行 memwarden 送來的丟棄請求 |
+| `extension/popup.*` | 彈出視窗：連線狀態、閒置門檻、分頁清單、逐一丟棄與「丟棄閒置分頁」（需確認） |
+| `extension/_locales/*/messages.json` | 擴充功能的四語系文字 |
+| `extension/tests/` | node 測試（打包時排除） |
 | `src/theme.rs` | 深色主題配色、依語言載入 Windows 系統字型 |
 | `src/i18n.rs` | 語言列舉、偵測 Windows 顯示語言 |
 | `locales/*.yml` | 介面文字（每語言一檔，缺字回退英文） |
@@ -89,7 +95,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
   - 截圖會含本機程序名稱，不要提交到 repo（`/screenshots/` 已被忽略）。
   - 程式不得連網。擴充功能 ↔ host ↔ memwarden 只走本機 stdio 與 named pipe
     （pipe 只允許目前使用者、拒絕遠端連線）。
-  - 分頁的 URL、標題只留在擴充功能內；memwarden 只收到分頁計數。
+  - 分頁的 URL、標題只留在擴充功能內；memwarden 只收到分頁計數。擴充功能不載入 favicon（會連網）。
   - Native Messaging 的登錄機碼由使用者手動執行註冊腳本寫入，memwarden 與 host 都不寫登錄。
   - 本機只寫入兩個檔案：UI 設定（`%APPDATA%\memwarden`，由 eframe 管理）與還原紀錄檔
     （`%LOCALAPPDATA%\memwarden\lowered-priorities.txt`，只有數字，沒有降低任何程式時會刪除）。
@@ -123,10 +129,13 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
    這個腳本用 `PrintWindow` 只擷取 memwarden 視窗，不會截到其他視窗。
    閒置狀態需要 `-WaitSeconds 370`（5 分鐘以上）；修剪按鈕需要 `-WaitSeconds 970`（15 分鐘以上）。
 3. 音訊偵測可對真實系統執行診斷：`cargo test audio -- --ignored --nocapture`（印出正在播放／錄音的 PID）。
-4. 擴充功能完成前，可以用假瀏覽器驗證 bridge 與分頁列：把 `powershell.exe` 複製成暫存目錄裡的 `chrome.exe`，
+4. 擴充功能：`node --test "extension/tests/*.test.mjs"`（需要 Node.js；只測不需瀏覽器的邏輯與四語系一致性）。
+   彈出視窗的版面可以在暫存目錄複製一份 `extension/`，在 `popup.js` 前加一個假的 `chrome` 物件
+   （`i18n`、`tabs`、`storage`、`runtime`），用本機 HTTP 伺服器開啟 `popup.html` 檢查。
+5. 不經真實瀏覽器驗證 bridge 與分頁列：把 `powershell.exe` 複製成暫存目錄裡的 `chrome.exe`，
    由它啟動 `memwarden-host.exe` 並在收到 `connected:true` 時送出 `tabs` 訊息（格式見 PLAN.md 7.5）。
    memwarden 會把它當成瀏覽器，在應用程式卡片顯示分頁列。測試完記得結束這些程序。
-5. 發佈版量測自身記憶體（工作管理員或 `Get-Process memwarden`）。
+6. 發佈版量測自身記憶體（工作管理員或 `Get-Process memwarden`）。
 
 ## 8. 已知問題與限制
 

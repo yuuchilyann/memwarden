@@ -479,16 +479,18 @@ fn browser_switch(ui: &mut Ui, s: &mut BrowserSwitch) {
 }
 
 /// The whole card shows `help` on hover; the ⓘ after the title hints at it.
+/// Its text is not selectable, so hovering shows the arrow, not a text cursor.
 fn kpi(ui: &mut Ui, title: &str, help: &str, value: String, detail: &str, meter_value: Option<(f64, Color32)>) {
+    let text = |ui: &mut Ui, text: RichText| ui.add(egui::Label::new(text).selectable(false));
     card(ui, false, |ui| {
         ui.spacing_mut().item_spacing.y = 6.0;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(RichText::new(title).size(13.0).color(MUTED));
-            ui.label(RichText::new("ⓘ").size(12.0).color(MUTED));
+            text(ui, RichText::new(title).size(13.0).color(MUTED));
+            text(ui, RichText::new("ⓘ").size(12.0).color(MUTED)).on_hover_cursor(egui::CursorIcon::Help);
         });
-        ui.label(RichText::new(value).size(28.0).strong());
-        ui.label(RichText::new(detail).size(12.5).color(MUTED));
+        text(ui, RichText::new(value).size(28.0).strong());
+        text(ui, RichText::new(detail).size(12.5).color(MUTED));
         match meter_value {
             Some((frac, color)) => meter(ui, frac, color),
             None => {
@@ -496,8 +498,10 @@ fn kpi(ui: &mut Ui, title: &str, help: &str, value: String, detail: &str, meter_
             }
         }
     });
-    // The column holds only this card, so its rect is the card's.
-    ui.interact(ui.min_rect(), ui.scope_id().with("kpi_help"), Sense::hover()).on_hover_text(help);
+    // The column holds only this card, so its rect is the card's. Sibling
+    // columns share a scope id, so the title keeps the four cards' ids apart.
+    let id = ui.scope_id().with(("kpi_help", title));
+    ui.interact(ui.min_rect(), id, Sense::hover()).on_hover_text(help);
 }
 
 fn kpi_row(ui: &mut Ui, snap: &Snapshot) {

@@ -4,10 +4,20 @@
 
 開發進度與下一步請見 [PLAN.md](PLAN.md)。
 
+**目前狀態（2026-10-31）**：M0–M5 完成；M6（瀏覽器擴充功能）與 M7（關閉建議、分頁檔資訊）程式完成，
+部分實機驗證待做（PLAN.md 7.10、8.9）。**下一步：M8 記憶體成長追蹤**（規格見 PLAN.md 第 9 節，尚未實作），
+之後是 M9 發佈。
+
 ## 1. 專案概要
 
-Windows 記憶體儀表板（Rust + egui）。可以找出閒置的應用程式，並在使用者觸發時降低它們的記憶體優先權，
-讓 Windows 在記憶體不足時優先回收；不會暫停或結束任何程序，所有變更都可還原。
+Windows 記憶體儀表板（Rust + egui）。定位是「看懂記憶體被誰吃掉、哪些做法真的有用」，不是一鍵清理：
+分清楚實體記憶體與認可記憶體（Commit），找出閒置的應用程式，並只在使用者觸發時：
+
+- 降低記憶體優先權（M4）、修剪工作集（M5）：都可還原，但不會降低 Commit；
+- 透過瀏覽器擴充功能丟棄閒置分頁（M6）：會降低 Commit；
+- 關閉閒置很久的大型程式（M7）：等同按視窗的 X，逐一確認，這是唯一無法還原的操作。
+
+不會暫停或強制結束任何程序。分頁檔設定只讀取，調整交給 Windows 的「效能選項」。
 
 ## 2. 環境
 
@@ -51,7 +61,8 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
   Collector::list()  → procs      │                drain_samples() → history
   classify::group(procs) → apps   ├ Snapshot ─mpsc─▶ header / kpi_row / history_card
   Tracker::update(procs, apps,    │                top_card / apps_card（篩選、類別、狀態）
-                  foreground)    ─┘
+                  foreground)     │              update_close()：每次新取樣後
+  pagefile::query()              ─┘                close::blocker / Closing::poll（在 UI 執行緒）
 ```
 
 ```
@@ -65,7 +76,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | 檔案 | 職責 |
 |---|---|
 | `src/main.rs` | 進入點、視窗設定、`rust_i18n::i18n!` 巨集 |
-| `src/app.rs` | 儀表板 UI 與狀態（歷史資料、篩選、語言） |
+| `src/app.rs` | 儀表板 UI 與狀態（歷史資料、篩選、語言、各種操作的確認與結果） |
 | `src/sampler.rs` | 背景取樣執行緒，避免列舉程序時卡住 UI |
 | `src/system.rs` | 系統層級：`GlobalMemoryStatusEx`、`GetPerformanceInfo` |
 | `src/process.rs` | 程序層級原始資料：Toolhelp 列舉、記憶體、CPU 時間、I/O、Session、Chromium `--type=` 偵測、前景程序 |
@@ -134,19 +145,28 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `ctx.style_mut(..)` | `ctx.style_mut_of(Theme::Dark, ..)` |
 | `Frame::none()`、`Rounding` | `Frame::new()`、`CornerRadius`（整數） |
 | `Line::new(points)` | `Line::new(name, points)` |
+| `ui.id()` | `ui.scope_id()`（`id()` 已棄用）。**並排的子 Ui（例如 `ui.columns` 的各欄）共用同一個 scope**，
+  自訂互動 ID 要再加上可區分的鹽值（例如卡片標題），否則 ID 重複、只有最後一個有效 |
 
 eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgpu` 會讓自身記憶體升到約 420 MB。
 
 ## 7. 驗證方式
 
-1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告。單元測試涵蓋不需呼叫 Win32 的純邏輯
-   （`classify.rs` 分類與 WebView2 歸屬、`activity.rs` 狀態轉換）。
+1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告（目前 memwarden 35 項 + host 10 項）。
+   純邏輯：`classify.rs` 分類與 WebView2 歸屬、`activity.rs` 狀態轉換、`bridge.rs` 訊息處理、
+   `close.rs` 建議條件與結果判定、`pagefile.rs` 設定解析與最大值。
+   會呼叫 Win32 的測試只操作測試自己啟動的子程序：`priority.rs`、`trim.rs`（`cmd.exe`），
+   `close.rs`（以 PowerShell 開一個縮小的 WinForms 視窗再送 `WM_CLOSE`，測試期間工作列會短暫出現它），
+   `integration.rs`（暫時的 `HKCU\Software\memwarden-test-*` 機碼）。
 2. 執行 `scripts/capture-window.ps1` 擷取四種語言的截圖並目視檢查：
    ```powershell
    .\scripts\capture-window.ps1 -Exe .\target\debug\memwarden.exe -OutDir .\screenshots -Langs zh-TW,en,ja,ko
    ```
    這個腳本用 `PrintWindow` 只擷取 memwarden 視窗，不會截到其他視窗。
-   閒置狀態需要 `-WaitSeconds 370`（5 分鐘以上）；修剪按鈕需要 `-WaitSeconds 970`（15 分鐘以上）。
+   閒置狀態需要 `-WaitSeconds 370`（5 分鐘以上）；修剪按鈕需要 `-WaitSeconds 970`（15 分鐘以上）；
+   關閉建議需要 30 分鐘以上。
+   已經有另一個 memwarden 在執行時，新開的視窗不會顯示（截圖只有 16×16），先關掉原本的再截圖。
+   懸停說明（tooltip）無法用這個腳本驗證，需要在實際視窗上用滑鼠確認。
 3. 音訊偵測可對真實系統執行診斷：`cargo test audio -- --ignored --nocapture`（印出正在播放／錄音的 PID）。
 4. 擴充功能：`node --test "extension/tests/*.test.mjs"`（需要 Node.js；只測不需瀏覽器的邏輯與四語系一致性）。
    彈出視窗的版面可以在暫存目錄複製一份 `extension/`，在 `popup.js` 前加一個假的 `chrome` 物件
@@ -169,3 +189,7 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 - 閒置門檻（30 秒平均、單核心 5%、512 KB/s、5 分鐘）是依開發機實測訂的經驗值，常數在 `activity.rs` 開頭。
 - 同時開兩個 memwarden 時，只有第一個能建立 pipe，第二個不顯示分頁資訊。
 - 以系統管理員身分執行 memwarden 時，一般權限的 host 能否連上尚未實測。
+- 關閉建議：只剩系統匣圖示的程式（LINE 等）無法由 memwarden 關閉，只能提示；檔案同步程式
+  （`close::KEEP_RUNNING`）不列入建議。按 X 只是縮到系統匣的程式，關閉後會顯示「仍在背景執行」。
+- 分頁檔由系統管理時的最大值依 Microsoft 文件計算（RAM × 3 或 4 GB 取大、不超過磁碟 1/8、受剩餘空間限制），
+  只在開發機（自動管理、單一 C:）實測過。

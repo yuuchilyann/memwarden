@@ -51,3 +51,6 @@ CLAUDE.local.md
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---- UI screenshots (contain this machine's process names) ----
+/screenshots/

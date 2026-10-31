@@ -15,6 +15,7 @@ mod app;
 mod audio;
 mod bridge;
 mod classify;
+mod close;
 mod i18n;
 mod integration;
 mod priority;

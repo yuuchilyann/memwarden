@@ -6,6 +6,7 @@ before changing code and update [docs/PLAN.md](docs/PLAN.md) progress when a tas
 Key rules (details in HANDOFF.md):
 - Only `priority.rs` and `trim.rs` may change other processes, only on user action, leaving no state that cannot be undone.
   `bridge.rs` only forwards user-triggered tab discard requests to the browser extension.
+  `close.rs` only posts `WM_CLOSE` to an app's top-level windows after the user confirms that one app; never terminate processes.
   Only `integration.rs` writes the registry (two HKCU Native Messaging keys), only when the user toggles it.
   Open processes through `process::open_instance` (checks PID + start time); elsewhere use `PROCESS_QUERY_LIMITED_INFORMATION` only.
 - Every user-visible string goes into all four `locales/*.yml` files.

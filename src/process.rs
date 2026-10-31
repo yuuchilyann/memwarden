@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessCommandLineInformation};
-use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, UNICODE_STRING};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, STILL_ACTIVE, UNICODE_STRING};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
@@ -12,7 +12,7 @@ use windows::Win32::System::ProcessStatus::{
 };
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{
-    GetProcessIoCounters, GetProcessTimes, IO_COUNTERS, OpenProcess, PROCESS_ACCESS_RIGHTS,
+    GetExitCodeProcess, GetProcessIoCounters, GetProcessTimes, IO_COUNTERS, OpenProcess, PROCESS_ACCESS_RIGHTS,
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
@@ -50,6 +50,16 @@ pub fn open_instance(inst: Instance, access: PROCESS_ACCESS_RIGHTS) -> Option<Ow
     let (mut c, mut e, mut k, mut u) = Default::default();
     unsafe { GetProcessTimes(process.raw(), &mut c, &mut e, &mut k, &mut u) }.ok()?;
     (ticks(c) == created).then_some(process)
+}
+
+/// Whether the instance is still running. An exited process can still be
+/// opened while handles to it remain, so its exit code is checked too.
+pub fn is_running(inst: Instance) -> bool {
+    let Some(process) = open_instance(inst, PROCESS_QUERY_LIMITED_INFORMATION) else {
+        return false;
+    };
+    let mut code = 0u32;
+    unsafe { GetExitCodeProcess(process.raw(), &mut code) }.is_ok() && code == STILL_ACTIVE.0 as u32
 }
 
 /// Current working set of an open process, in bytes.

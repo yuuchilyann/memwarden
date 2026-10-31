@@ -73,6 +73,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `src/activity.rs` | 跨取樣追蹤 CPU、I/O、前景，判定使用中／不活躍／閒置 |
 | `src/priority.rs` | `Governor`：降低／還原記憶體優先權、自動還原、當機還原紀錄檔（M4） |
 | `src/trim.rs` | 修剪長時間閒置程式的工作集，在背景執行緒進行並回報實際移出量（M5） |
+| `src/close.rs` | 關閉建議：判定建議關閉的程式、對其最上層視窗送 `WM_CLOSE`、追蹤結果（M7） |
 | `src/audio.rs` | Core Audio：找出有作用中播放／錄音工作階段的程序（M5） |
 | `src/integration.rs` | 「瀏覽器整合」開關：寫入／刪除 host 資訊清單與 HKCU 的 Native Messaging 機碼（M6） |
 | `src/bridge.rs` | 瀏覽器擴充功能的 pipe 伺服器：依 client PID 判定瀏覽器、加總各設定檔的分頁數、轉送使用者觸發的丟棄請求（M6） |
@@ -97,6 +98,8 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
   且不得留下無法還原的狀態。開啟程序一律經 `process::open_instance`（檢查 PID + 啟動時間）。其他模組開啟程序只能用 `PROCESS_QUERY_LIMITED_INFORMATION`。
   `Governor` 由 UI 與取樣執行緒共用（`Arc<Mutex<_>>`）；UI 的操作先收集成 `Action`，畫面繪製完再套用。
   `bridge.rs` 不直接改變任何程序，只在使用者按下按鈕時請擴充功能丟棄閒置分頁，實際丟棄由瀏覽器執行。
+  `close.rs` 只在使用者確認關閉某個程式後，對它可見的最上層視窗送 `WM_CLOSE`（等同按 X），
+  不結束程序、不開啟具寫入權限的程序控制代碼。這是唯一無法還原的操作，所以只能逐一確認，不做批次或自動關閉。
 - **i18n**：使用者看得到的字串一律加入四個 `locales/*.yml`，用 `t!("key", name = value)`。
   鍵名用「區塊.項目」（例如 `kpi.commit.title`）。
   翻譯在編譯期內嵌，**只改 `.yml` 不會觸發重新編譯**，介面會顯示鍵名；改完先 `touch src/main.rs`

@@ -7,7 +7,15 @@
 **目前狀態（2026-10-31）**：M0–M5 完成；M6（瀏覽器擴充功能）、M7（關閉建議、分頁檔資訊）與
 M8（記憶體成長追蹤）程式完成，部分實機驗證待做（PLAN.md 7.10、8.9、9.8；M8 需要開著數小時觀察並調整門檻）。
 **目前進行 M9 發佈**（PLAN.md 第 10 節）：CI、圖示、打包、README 已完成，
-repo 已公開於 https://github.com/yuuchilyann/memwarden ，CI 通過。待做：第一次 Release、發佈版自身占用量測。
+repo 已公開於 https://github.com/yuuchilyann/memwarden ，CI 通過。
+
+**下一步**（依序）：
+
+1. M8 實機觀察：擁有者離開辦公室時開著發佈版收集資料（做法見第 7 節第 7 項），回來後依結果調整 `growth.rs` 門檻，
+   同時記錄發佈版自身占用（介紹網頁前要處理）。
+2. 第一次 Release（做法見 3.1）：推送 `v0.1.0` 標籤，檢查草稿後由擁有者發佈。
+3. 其餘實機驗證：M6 Edge／多設定檔／memwarden 中途關閉（PLAN.md 7.10），
+   M7 有視窗程式的關閉結果、記事本未存檔、以系統管理員執行的程式（PLAN.md 8.9）。
 
 ## 1. 專案概要
 
@@ -16,7 +24,8 @@ Windows 記憶體儀表板（Rust + egui）。定位是「看懂記憶體被誰�
 
 - 降低記憶體優先權（M4）、修剪工作集（M5）：都可還原，但不會降低 Commit；
 - 透過瀏覽器擴充功能丟棄閒置分頁（M6）：會降低 Commit；
-- 關閉閒置很久的大型程式（M7）：等同按視窗的 X，逐一確認，這是唯一無法還原的操作。
+- 關閉閒置很久的大型程式（M7）：等同按視窗的 X，逐一確認，這是唯一無法還原的操作；
+- 持續成長的程式（M8）：提示重新開啟約可降低多少，沿用 M7 的關閉流程，不自動重新開啟。
 
 不會暫停或強制結束任何程序。分頁檔設定只讀取，調整交給 Windows 的「效能選項」。
 
@@ -28,6 +37,15 @@ Windows 記憶體儀表板（Rust + egui）。定位是「看懂記憶體被誰�
 | Rust | 1.99（edition 2024） |
 | 主要套件 | `eframe`/`egui` 0.37、`egui_plot` 0.38、`egui_extras` 0.37、`windows` 0.62、`rust-i18n` 4、`serde_json` 1 |
 | Git 作者 | `見未亞由 <yuuchilyann@hotmail.com>`（已由專案擁有者同意公開） |
+| GitHub | https://github.com/yuuchilyann/memwarden（公開，`master` 分支；`gh` 已登入 `yuuchilyann`） |
+| 授權 | `MIT OR Apache-2.0`（使用者二選一）。兩者都不授予商標權，名稱與圖示需另行保護 |
+
+**Git 注意**：`E:\memwarden\.git` 的擁有者是 Administrators，一般使用者執行 git 會出現 `dubious ownership`。
+不要改全域設定，用 `git -c safe.directory=E:/memwarden ...`；`gh` 會在內部呼叫 git，改用環境變數：
+
+```bash
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=E:/memwarden
+```
 
 ## 3. 建置與執行
 
@@ -43,6 +61,13 @@ $env:MEMWARDEN_LANG = "ja"; cargo run   # 強制指定語言（zh-TW / en / ja /
 ```
 
 以系統管理員身分執行可讀取全部程序；否則受保護程序（例如防毒軟體）會被計入「無法讀取」。
+
+### 3.1 發佈流程
+
+1. 把 `Cargo.toml` 與 `extension/manifest.json` 的版本改成新版本並提交（`package.ps1` 只檢查 `Cargo.toml`）。
+2. 本機先跑 `.\scripts\package.ps1` 確認 zip 內容。
+3. `git tag v<版本>`、`git push origin v<版本>`：`release.yml` 建置、打包並建立**草稿** Release。
+4. 由擁有者在 GitHub 檢查草稿（檔案、說明）後按發佈。發佈是對外動作，不要自行發佈。
 
 瀏覽器擴充功能（M6）的安裝：
 
@@ -188,6 +213,10 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
    由它啟動 `memwarden-host.exe` 並在收到 `connected:true` 時送出 `tabs` 訊息（格式見 PLAN.md 7.5）。
    memwarden 會把它當成瀏覽器，在應用程式卡片顯示分頁列。測試完記得結束這些程序。
 6. 發佈版量測自身記憶體（工作管理員或 `Get-Process memwarden`）。
+7. M8 實機觀察：把 `dist\memwarden-<版本>-windows-x64.zip` 解壓縮到 repo 以外的資料夾，從檔案總管或一般終端機
+   啟動（不要從 Claude desktop app 啟動，視窗不會顯示；也不要直接執行 `target\release` 的檔案，開著時會鎖住、
+   之後無法重新建置）。開著數小時，記錄被標示「持續成長」的程式、懸停說明的數字與折線，以及 memwarden 自身占用。
+   目前介面只顯示已達門檻的程式，看不到差一點達標的程式。
 
 ## 8. 已知問題與限制
 
@@ -204,5 +233,7 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 - 以系統管理員身分執行 memwarden 時，一般權限的 host 能否連上尚未實測。
 - 關閉建議：只剩系統匣圖示的程式（LINE 等）無法由 memwarden 關閉，只能提示；檔案同步程式
   （`close::KEEP_RUNNING`）不列入建議。按 X 只是縮到系統匣的程式，關閉後會顯示「仍在背景執行」。
+- 執行檔沒有程式碼簽章，第一次執行會出現 SmartScreen 警告（README 有說明）。
+- CI 的 Windows runner 會讓子程序繼承 Low 記憶體優先權；測試不能假設新程序是 Normal（見 `priority.rs` 測試）。
 - 分頁檔由系統管理時的最大值依 Microsoft 文件計算（RAM × 3 或 4 GB 取大、不超過磁碟 1/8、受剩餘空間限制），
   只在開發機（自動管理、單一 C:）實測過。

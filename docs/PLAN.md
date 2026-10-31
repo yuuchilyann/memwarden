@@ -162,7 +162,7 @@ Firefox 等非 Chromium 瀏覽器不在本階段範圍。
 extension/   Chrome MV3 擴充功能（純 JS，無建置步驟）
 host/        Native Messaging host：memwarden-host.exe（workspace 成員）
 src/bridge.rs  memwarden 端的 named pipe 伺服器
-scripts/register-host.ps1  註冊／解除註冊 host
+src/integration.rs  「瀏覽器整合」開關：註冊／解除註冊 host
 ```
 
 ```
@@ -270,14 +270,25 @@ JSON 格式錯誤或必要欄位缺漏也會斷線。
 - **寫入界線**：`bridge.rs` 不直接改變任何程序，只轉送使用者觸發的丟棄請求，實際丟棄由瀏覽器執行。
   HANDOFF 的寫入界線規則需補上這一條。
 
-### 7.8 註冊
+### 7.8 註冊（「瀏覽器整合」開關）
 
-`scripts/register-host.ps1` 由使用者手動執行：
+Chrome／Edge 在 Windows 上只從登錄尋找 Native Messaging host，所以正式使用者也需要註冊。
+memwarden 標題列有「瀏覽器整合」核取方塊（`integration.rs`），只在使用者勾選時寫入、取消勾選時全部刪除：
 
-- 在 `memwarden-host.exe` 旁產生 host 資訊清單（`com.memwarden.host.json`，`allowed_origins` 只有本擴充功能 ID）。
+- 寫出 host 資訊清單 `%LOCALAPPDATA%\memwarden\com.memwarden.host.json`：`path` 指向與 memwarden.exe
+  同資料夾的 `memwarden-host.exe`，`allowed_origins` 只有本擴充功能 ID。放在 `%LOCALAPPDATA%` 而不是執行檔旁，
+  因為安裝在 Program Files 時一般使用者不能寫入執行檔資料夾。
 - 寫入 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memwarden.host` 與
-  `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.memwarden.host`（預設值為資訊清單路徑）。
-- `-Unregister` 刪除上述機碼與資訊清單。memwarden 本身不寫登錄。
+  `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.memwarden.host`（預設值為資訊清單路徑）。只寫 HKCU，不需要管理員權限。
+- 狀態在啟動時與每次切換後讀取：已啟用（兩個機碼都指向本份資訊清單，且清單內容與目前的 host 路徑相符）、
+  未啟用（沒有機碼）、指向其他位置（例如另一份 memwarden 或只註冊了一半；勾選即改為這一份）。
+- 取消勾選只刪除指向本份資訊清單的機碼，不會刪掉另一份 memwarden 的註冊。
+- 找不到 `memwarden-host.exe` 時核取方塊停用並說明原因。
+- **MSIX 容器**：從封裝成 MSIX 的程式（例如 Claude desktop app 及其終端機面板）啟動的 memwarden，
+  寫入 `HKCU\Software` 與 `%LOCALAPPDATA%` 會被虛擬化，瀏覽器看不到。開發時要從一般終端機啟動才能測試這個開關。
+  2026-10-31 實測時就是這個原因造成 Chrome 回報「Specified native messaging host not found」。
+- **測試**：`integration.rs` 有 3 項測試，使用暫時的 `HKCU\Software\memwarden-test-*` 機碼與暫存資料夾，
+  不碰瀏覽器的機碼：來回切換、不刪除別份的註冊、只註冊一半時不算啟用。
 
 ### 7.9 可還原性
 
@@ -294,10 +305,11 @@ JSON 格式錯誤或必要欄位缺漏也會斷線。
 - [x] `bridge.rs`：named pipe 伺服器、DACL、訊息解析（5 項單元測試；host 函式庫另有 server／client 實際收發測試）
 - [x] 擴充功能：manifest、service worker、候選判定、彈出視窗、四語系 `_locales`
       （6 項 node 測試；彈出視窗以假的 `chrome` 物件在瀏覽器中渲染，確認四語系、三種連線狀態與確認後丟棄的流程。
-      尚未在真實 Chrome／Edge 載入，需先完成註冊腳本）
+      已在真實 Chrome 載入並連上 memwarden）
 - [x] memwarden 介面：瀏覽器列的分頁概況、丟棄按鈕與結果、四語系 `locales/*.yml`
       （以改名為 `chrome.exe` 的 PowerShell 扮演瀏覽器，透過 host 送出概況，截圖確認顯示；按下丟棄的流程待擴充功能完成後實機驗證）
-- [ ] `register-host.ps1`（含 `-Unregister`）
+- [x] 註冊：先做了 `register-host.ps1`，在真實 Chrome 確認可連線（2026-10-31，擴充功能顯示「已連線 memwarden」），
+      之後改為 memwarden 內的「瀏覽器整合」開關並移除腳本（見 7.8）
 - [ ] 實機驗證：Chrome 與 Edge、多設定檔、memwarden 未執行／中途結束、Commit 前後量測
 - [ ] 量測 host 與 memwarden 自身占用
 - [ ] 更新 HANDOFF：架構、檔案表、寫入界線、隱私（登錄機碼、分頁資料）、i18n 規則、驗證方式
@@ -321,6 +333,7 @@ JSON 格式錯誤或必要欄位缺漏也會斷線。
 | 2026-10-31 | 丟棄分頁只由使用者觸發，預設門檻 15 分鐘 | 未儲存的表單內容可能遺失，且無法在不注入 content script 的情況下偵測 |
 | 2026-10-31 | 不做單一分頁記憶體 | 穩定版 Chrome 沒有分頁 ↔ PID 的 API；改以瀏覽器整體的前後實測差值呈現 |
 | 2026-10-31 | 瀏覽器由 memwarden 依 pipe client PID 自行判定，`hello` 只帶版本 | 不採信連線方自報的身分；host 也因此不必列舉程序 |
+| 2026-10-31 | host 註冊改由 memwarden 的「瀏覽器整合」開關處理，不用腳本或安裝程式 | Windows 上瀏覽器只從登錄找 host，正式使用者也需要註冊；開關讓免安裝版也能使用，且由使用者決定、可完全移除 |
 
 ## 9. 非目標
 

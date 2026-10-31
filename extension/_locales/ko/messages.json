@@ -65,7 +65,7 @@
     "message": "memwarden이 실행 중이 아닙니다"
   },
   "statusNoHost": {
-    "message": "memwarden-host가 등록되지 않았습니다"
+    "message": "memwarden에서 \"브라우저 연동\"을 켜 주세요"
   },
   "idleFor": {
     "message": "유휴 $DURATION$",

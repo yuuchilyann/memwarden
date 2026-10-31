@@ -65,7 +65,7 @@
     "message": "memwarden が起動していません"
   },
   "statusNoHost": {
-    "message": "memwarden-host が登録されていません"
+    "message": "memwarden で「ブラウザー連携」をオンにしてください"
   },
   "idleFor": {
     "message": "アイドル $DURATION$",

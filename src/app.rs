@@ -14,6 +14,7 @@ use crate::activity::Status;
 use crate::bridge::{Bridge, BrowserTabs, Discard};
 use crate::classify::{AppUsage, Category};
 use crate::i18n::Lang;
+use crate::integration::{self, Integration};
 use crate::priority::Governor;
 use crate::process::Instance;
 use crate::trim;
@@ -46,7 +47,16 @@ pub struct App {
     governor: Arc<Mutex<Governor>>,
     /// `None` when the pipe could not be created (another memwarden is running).
     bridge: Option<Bridge>,
+    browser_switch: BrowserSwitch,
     controls: Controls,
+}
+
+/// The "browser integration" switch in the header.
+struct BrowserSwitch {
+    integration: Integration,
+    /// Read at start and after every change, not every frame.
+    state: integration::State,
+    error: Option<String>,
 }
 
 /// State of the priority and trim controls.
@@ -138,6 +148,10 @@ impl App {
             lang,
             governor,
             bridge: Bridge::start(cc.egui_ctx.clone()),
+            browser_switch: {
+                let integration = Integration::new();
+                BrowserSwitch { state: integration.state(), integration, error: None }
+            },
             controls: Controls::default(),
         }
     }
@@ -243,12 +257,12 @@ impl eframe::App for App {
         if let (Some(run), Some(snap)) = (self.controls.last_discard.as_mut(), self.latest.as_ref()) {
             measure_discard(run, &browsers, snap);
         }
-        let Self { latest, history, filter, started, lang, controls, .. } = self;
+        let Self { latest, history, filter, started, lang, controls, browser_switch, .. } = self;
 
         let picked = egui::Panel::top("header")
             .frame(Frame::new().fill(theme::BG).inner_margin(Margin::symmetric(20, 14)))
             .show_separator_line(false)
-            .show(ui, |ui| header(ui, latest.as_ref(), *lang, lowered))
+            .show(ui, |ui| header(ui, latest.as_ref(), *lang, lowered, browser_switch))
             .inner;
         if let Some(new_lang) = picked {
             *lang = new_lang;
@@ -340,7 +354,7 @@ fn fmt_change(decrease: i64) -> String {
 // ---------- sections ----------
 
 /// Returns the newly picked language, if the user changed it.
-fn header(ui: &mut Ui, latest: Option<&Snapshot>, lang: Lang, lowered: usize) -> Option<Lang> {
+fn header(ui: &mut Ui, latest: Option<&Snapshot>, lang: Lang, lowered: usize, switch: &mut BrowserSwitch) -> Option<Lang> {
     let mut picked = lang;
     ui.horizontal(|ui| {
         ui.label(RichText::new("memwarden").size(22.0).strong());
@@ -354,6 +368,8 @@ fn header(ui: &mut Ui, latest: Option<&Snapshot>, lang: Lang, lowered: usize) ->
                         ui.selectable_value(&mut picked, l, l.native_name());
                     }
                 });
+            ui.add_space(8.0);
+            browser_switch(ui, switch);
             ui.add_space(8.0);
             if lowered > 0 {
                 ui.label(RichText::new(t!("status.lowered", count = lowered)).size(12.0).color(AMBER));
@@ -374,6 +390,27 @@ fn header(ui: &mut Ui, latest: Option<&Snapshot>, lang: Lang, lowered: usize) ->
         });
     });
     (picked != lang).then_some(picked)
+}
+
+/// Checkbox that registers memwarden-host with the browsers. Changes happen
+/// only when the user clicks it; turning it off removes everything it wrote.
+fn browser_switch(ui: &mut Ui, s: &mut BrowserSwitch) {
+    let mut on = s.state == integration::State::Enabled;
+    let path = s.integration.manifest_path().map_or_else(String::new, |p| p.display().to_string());
+    let response = ui
+        .add_enabled(s.integration.available(), egui::Checkbox::new(&mut on, t!("integration.toggle")))
+        .on_hover_text(t!("integration.explain", path = path))
+        .on_disabled_hover_text(t!("integration.unavailable"));
+    if response.changed() {
+        let result = if on { s.integration.enable() } else { s.integration.disable() };
+        s.error = result.err().map(|e| e.to_string());
+        s.state = s.integration.state();
+    }
+    if let Some(error) = &s.error {
+        ui.label(RichText::new(t!("integration.failed", error = error)).size(12.0).color(RED));
+    } else if s.state == integration::State::Elsewhere {
+        ui.label(RichText::new(t!("integration.elsewhere")).size(12.0).color(AMBER));
+    }
 }
 
 fn kpi(ui: &mut Ui, title: &str, value: String, detail: &str, meter_value: Option<(f64, Color32)>) {

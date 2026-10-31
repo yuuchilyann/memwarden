@@ -65,7 +65,7 @@
     "message": "memwarden is not running"
   },
   "statusNoHost": {
-    "message": "memwarden-host is not registered"
+    "message": "Browser integration is off in memwarden"
   },
   "idleFor": {
     "message": "Idle $DURATION$",

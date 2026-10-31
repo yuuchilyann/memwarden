@@ -22,13 +22,17 @@ function duration(ms) {
 
 async function refreshStatus() {
   try {
-    const { status } = await chrome.runtime.sendMessage({ type: "status" });
+    const { status, detail } = await chrome.runtime.sendMessage({ type: "status" });
     const el = $("status");
     el.className = `status ${status}`;
     el.textContent = msg(
       { connected: "statusConnected", no_memwarden: "statusNoMemwarden", no_host: "statusNoHost" }[status] ??
         "statusConnecting",
     );
+    // The browser's own error text (English), to tell a missing registration
+    // from a host that failed to start.
+    el.title = detail ?? "";
+    $("status-detail").textContent = status === "no_host" ? (detail ?? "") : "";
   } catch {
     // The service worker is restarting; try again on the next poll.
   }

@@ -16,6 +16,7 @@ mod audio;
 mod bridge;
 mod classify;
 mod i18n;
+mod integration;
 mod priority;
 mod process;
 mod sampler;

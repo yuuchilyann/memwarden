@@ -12,35 +12,43 @@ const SEND_THROTTLE_MS = 5_000;
 const REFRESH_MS = 60_000;
 // After the host went away, retry on the next tab event at most this often.
 const RECONNECT_MS = 60_000;
+// Opening the popup retries sooner, but not on every status poll.
+const POPUP_RECONNECT_MS = 5_000;
 
 let port = null;
 /** "connecting" | "no_host" | "no_memwarden" | "connected" */
 let status = "connecting";
+/** The browser's message when the host could not be started; shown in the popup. */
+let detail = "";
 let lastAttempt = 0;
 let sendTimer = null;
 let refreshTimer = null;
 
+// A retry keeps the last known status, so the popup shows why the previous
+// attempt failed instead of flickering back to "connecting".
 function connect() {
   if (port) return;
   lastAttempt = Date.now();
-  status = "connecting";
   let heard = false;
   try {
     port = chrome.runtime.connectNative(HOST);
-  } catch {
-    status = "no_host";
+  } catch (e) {
+    detail = String(e?.message ?? e);
+    setStatus("no_host");
     return;
   }
   port.onMessage.addListener((msg) => {
     heard = true;
+    detail = "";
     onHostMessage(msg);
   });
   port.onDisconnect.addListener(() => {
-    // Reading lastError marks it as handled.
-    void chrome.runtime.lastError;
+    // Reading lastError also marks it as handled.
+    const error = chrome.runtime.lastError?.message ?? "";
     port = null;
     // The host always reports a status first, so silence means it is not
     // registered or could not start.
+    if (!heard) detail = error;
     setStatus(heard ? "no_memwarden" : "no_host");
   });
 }
@@ -104,8 +112,8 @@ chrome.storage.onChanged.addListener(() => sendTabs());
 // The popup asks for the connection status; opening it also retries the host.
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "status") {
-    if (!port) connect();
-    sendResponse({ status });
+    if (!port && Date.now() - lastAttempt >= POPUP_RECONNECT_MS) connect();
+    sendResponse({ status, detail });
   }
 });
 

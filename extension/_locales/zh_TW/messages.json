@@ -65,7 +65,7 @@
     "message": "memwarden 未執行"
   },
   "statusNoHost": {
-    "message": "memwarden-host 尚未註冊"
+    "message": "請在 memwarden 開啟「瀏覽器整合」"
   },
   "idleFor": {
     "message": "閒置 $DURATION$",

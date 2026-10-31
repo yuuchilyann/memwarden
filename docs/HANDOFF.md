@@ -32,6 +32,17 @@ $env:MEMWARDEN_LANG = "ja"; cargo run   # 強制指定語言（zh-TW / en / ja /
 
 以系統管理員身分執行可讀取全部程序；否則受保護程序（例如防毒軟體）會被計入「無法讀取」。
 
+瀏覽器擴充功能（M6）的安裝：
+
+1. 在 memwarden 標題列勾選「瀏覽器整合」（寫入 HKCU 登錄與 `%LOCALAPPDATA%\memwarden\com.memwarden.host.json`，
+   取消勾選即全部刪除）。`memwarden-host.exe` 必須和 memwarden.exe 在同一個資料夾，`cargo build` 會一起產生。
+2. 到 `chrome://extensions`（或 `edge://extensions`）開啟開發人員模式，「載入未封裝項目」選 `extension\`，
+   確認 ID 是 `jmngjfeoiaihgaabjklldhfmnaejnkga`。
+
+**注意**：Claude desktop app 是 MSIX 套件，從它（包含它的終端機面板）啟動的程式寫入 `HKCU\Software` 與
+`%LOCALAPPDATA%` 會被虛擬化，瀏覽器看不到，擴充功能會一直顯示「請在 memwarden 開啟瀏覽器整合」
+（錯誤訊息 `Specified native messaging host not found`）。要測試瀏覽器整合時，memwarden 請從一般終端機啟動。
+
 ## 4. 架構
 
 ```
@@ -63,6 +74,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `src/priority.rs` | `Governor`：降低／還原記憶體優先權、自動還原、當機還原紀錄檔（M4） |
 | `src/trim.rs` | 修剪長時間閒置程式的工作集，在背景執行緒進行並回報實際移出量（M5） |
 | `src/audio.rs` | Core Audio：找出有作用中播放／錄音工作階段的程序（M5） |
+| `src/integration.rs` | 「瀏覽器整合」開關：寫入／刪除 host 資訊清單與 HKCU 的 Native Messaging 機碼（M6） |
 | `src/bridge.rs` | 瀏覽器擴充功能的 pipe 伺服器：依 client PID 判定瀏覽器、加總各設定檔的分頁數、轉送使用者觸發的丟棄請求（M6） |
 | `host/src/main.rs` | `memwarden-host.exe`：在擴充功能的 stdio 與 memwarden 的 pipe 之間轉送訊框，不解析內容 |
 | `host/src/frame.rs` | 訊框格式（4 位元組長度 + JSON，上限 64 KB），host 與 bridge 共用 |
@@ -96,8 +108,10 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
   - 程式不得連網。擴充功能 ↔ host ↔ memwarden 只走本機 stdio 與 named pipe
     （pipe 只允許目前使用者、拒絕遠端連線）。
   - 分頁的 URL、標題只留在擴充功能內；memwarden 只收到分頁計數。擴充功能不載入 favicon（會連網）。
-  - Native Messaging 的登錄機碼由使用者手動執行註冊腳本寫入，memwarden 與 host 都不寫登錄。
-  - 本機只寫入兩個檔案：UI 設定（`%APPDATA%\memwarden`，由 eframe 管理）與還原紀錄檔
+  - 登錄只由 `integration.rs` 在使用者勾選「瀏覽器整合」時寫入 HKCU 的兩個 Native Messaging 機碼，取消勾選即刪除；
+    其他模組與 host 都不寫登錄。
+  - 本機只寫入三個檔案：UI 設定（`%APPDATA%\memwarden`，由 eframe 管理）、啟用瀏覽器整合時的
+    host 資訊清單（`%LOCALAPPDATA%\memwarden\com.memwarden.host.json`），與還原紀錄檔
     （`%LOCALAPPDATA%\memwarden\lowered-priorities.txt`，只有數字，沒有降低任何程式時會刪除）。
 - **平台程式碼**：Windows API 呼叫集中在 `system.rs`、`process.rs`（及 M3 新增模組）與 `host/src/`，UI 不直接呼叫 Win32。
 - **字型**：不打包字型檔，執行時讀取 `C:\Windows\Fonts`。

@@ -9,12 +9,16 @@ status.read_only: "唯讀模式"
 
 kpi.physical.title: "實體記憶體"
 kpi.physical.detail: "共 %{total} · %{pct}%"
+kpi.physical.help: "程式與 Windows 目前實際占用的 RAM，不含可隨時回收的快取。接近 100% 時，Windows 會把較少用的資料移到分頁檔，電腦會明顯變慢。"
 kpi.commit.title: "認可記憶體 (Commit)"
 kpi.commit.detail: "上限 %{limit} · %{pct}%"
+kpi.commit.help: "所有程式向 Windows 預約的記憶體總量，不論資料目前在 RAM 還是分頁檔。上限是 RAM 加上分頁檔大小；到達上限時，程式無法再配置記憶體，可能當機。關閉程式或丟棄瀏覽器分頁會降低它，修剪工作集不會。"
 kpi.available.title: "可用記憶體"
 kpi.available.detail: "備用 + 閒置 · 快取 %{cache}"
+kpi.available.help: "可以立刻交給程式使用的 RAM：完全空著的部分，加上「備用」清單裡最近讀過的檔案資料。快取在需要時會自動釋出，所以快取很大、空著的很少是正常現象，並不代表記憶體不足。"
 kpi.kernel.title: "核心集區"
 kpi.kernel.detail: "分頁 %{paged} · 非分頁 %{nonpaged}"
+kpi.kernel.help: "Windows 核心與驅動程式使用的記憶體。分頁集區可以移到分頁檔，非分頁集區必須一直留在 RAM。如果持續成長、不會回落，可能是驅動程式有記憶體洩漏。"
 
 alert.commit: "認可記憶體已達上限的 %{pct}%。到達 100% 時，應用程式可能無法配置記憶體而當機。請關閉不使用的應用程式，或加大分頁檔。"
 

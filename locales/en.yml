@@ -9,12 +9,16 @@ status.read_only: "read-only"
 
 kpi.physical.title: "Physical memory"
 kpi.physical.detail: "of %{total} · %{pct}%"
+kpi.physical.help: "RAM currently in use by programs and Windows, not counting cache that can be reclaimed at any time. Near 100%, Windows moves less-used data to the page file and the computer slows down noticeably."
 kpi.commit.title: "Commit charge"
 kpi.commit.detail: "of %{limit} limit · %{pct}%"
+kpi.commit.help: "Total memory that all programs have reserved from Windows, whether the data is in RAM or in the page file. The limit is RAM plus the page file; when it is reached, programs cannot allocate more memory and may crash. Closing programs or discarding browser tabs lowers it; trimming working sets does not."
 kpi.available.title: "Available"
 kpi.available.detail: "standby + free · cache %{cache}"
+kpi.available.help: "RAM that can be handed to programs right away: memory that is completely free, plus recently read file data on the standby list. The cache is released automatically when needed, so a large cache with little free memory is normal and does not mean memory is running out."
 kpi.kernel.title: "Kernel pool"
 kpi.kernel.detail: "paged %{paged} · nonpaged %{nonpaged}"
+kpi.kernel.help: "Memory used by the Windows kernel and drivers. The paged pool can be moved to the page file; the nonpaged pool must always stay in RAM. If it keeps growing and never drops, a driver may be leaking memory."
 
 alert.commit: "Commit charge is at %{pct}% of the limit. At 100% applications can fail to allocate memory and crash. Close unused applications or enlarge the page file."
 

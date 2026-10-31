@@ -413,10 +413,15 @@ fn browser_switch(ui: &mut Ui, s: &mut BrowserSwitch) {
     }
 }
 
-fn kpi(ui: &mut Ui, title: &str, value: String, detail: &str, meter_value: Option<(f64, Color32)>) {
+/// The whole card shows `help` on hover; the ⓘ after the title hints at it.
+fn kpi(ui: &mut Ui, title: &str, help: &str, value: String, detail: &str, meter_value: Option<(f64, Color32)>) {
     card(ui, false, |ui| {
         ui.spacing_mut().item_spacing.y = 6.0;
-        ui.label(RichText::new(title).size(13.0).color(MUTED));
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(RichText::new(title).size(13.0).color(MUTED));
+            ui.label(RichText::new("ⓘ").size(12.0).color(MUTED));
+        });
         ui.label(RichText::new(value).size(28.0).strong());
         ui.label(RichText::new(detail).size(12.5).color(MUTED));
         match meter_value {
@@ -426,6 +431,8 @@ fn kpi(ui: &mut Ui, title: &str, value: String, detail: &str, meter_value: Optio
             }
         }
     });
+    // The column holds only this card, so its rect is the card's.
+    ui.interact(ui.min_rect(), ui.scope_id().with("kpi_help"), Sense::hover()).on_hover_text(help);
 }
 
 fn kpi_row(ui: &mut Ui, snap: &Snapshot) {
@@ -435,6 +442,7 @@ fn kpi_row(ui: &mut Ui, snap: &Snapshot) {
         kpi(
             &mut cols[0],
             &t!("kpi.physical.title"),
+            &t!("kpi.physical.help"),
             fmt_bytes(s.phys_used()),
             &t!("kpi.physical.detail", total = fmt_bytes(s.phys_total), pct = format!("{phys:.0}")),
             Some((phys / 100.0, theme::level_color(phys))),
@@ -443,6 +451,7 @@ fn kpi_row(ui: &mut Ui, snap: &Snapshot) {
         kpi(
             &mut cols[1],
             &t!("kpi.commit.title"),
+            &t!("kpi.commit.help"),
             fmt_bytes(s.commit_total),
             &t!("kpi.commit.detail", limit = fmt_bytes(s.commit_limit), pct = format!("{commit:.0}")),
             Some((commit / 100.0, theme::level_color(commit))),
@@ -450,6 +459,7 @@ fn kpi_row(ui: &mut Ui, snap: &Snapshot) {
         kpi(
             &mut cols[2],
             &t!("kpi.available.title"),
+            &t!("kpi.available.help"),
             fmt_bytes(s.phys_avail),
             &t!("kpi.available.detail", cache = fmt_bytes(s.system_cache)),
             Some((s.phys_avail as f64 / s.phys_total as f64, BLUE)),
@@ -457,6 +467,7 @@ fn kpi_row(ui: &mut Ui, snap: &Snapshot) {
         kpi(
             &mut cols[3],
             &t!("kpi.kernel.title"),
+            &t!("kpi.kernel.help"),
             fmt_bytes(s.kernel_paged + s.kernel_nonpaged),
             &t!("kpi.kernel.detail", paged = fmt_bytes(s.kernel_paged), nonpaged = fmt_bytes(s.kernel_nonpaged)),
             None,

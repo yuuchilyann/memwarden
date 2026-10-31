@@ -8,6 +8,11 @@ readme = "README.md"
 keywords = ["memory", "windows", "working-set", "pagefile"]
 categories = ["gui"]
 
+[workspace]
+members = ["host"]
+# Plain `cargo build` / `cargo test` cover the native messaging host too.
+default-members = [".", "host"]
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [
     "Wdk_System_Threading",

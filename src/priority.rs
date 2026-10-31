@@ -11,21 +11,17 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
 use windows::Win32::System::Threading::{
-    GetProcessInformation, GetProcessTimes, MEMORY_PRIORITY, MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_LOW,
-    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION, ProcessMemoryPriority,
-    SetProcessInformation,
+    GetProcessInformation, MEMORY_PRIORITY, MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_LOW,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION, ProcessMemoryPriority, SetProcessInformation,
 };
 
 use crate::activity::Status;
 use crate::classify::AppUsage;
+use crate::process::{Instance, open_instance};
 
 /// Priority applied to idle applications (Windows default is NORMAL = 5).
 const LOWERED: MEMORY_PRIORITY = MEMORY_PRIORITY_LOW;
-
-/// Process instance: PID plus start time, so a reused PID is never touched.
-type Instance = (u32, u64);
 
 #[derive(Default)]
 pub struct Governor {
@@ -173,61 +169,41 @@ fn default_journal_path() -> Option<PathBuf> {
     Some(PathBuf::from(base).join("memwarden").join("lowered-priorities.txt"))
 }
 
-/// Opens the process only if it is still the same instance.
-fn open(inst: Instance) -> Option<HANDLE> {
-    let (pid, created) = inst;
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_INFORMATION, false, pid) }.ok()?;
-    let (mut c, mut e, mut k, mut u) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
-    let same = unsafe { GetProcessTimes(handle, &mut c, &mut e, &mut k, &mut u) }.is_ok()
-        && ((c.dwHighDateTime as u64) << 32 | c.dwLowDateTime as u64) == created;
-    if same {
-        Some(handle)
-    } else {
-        unsafe {
-            let _ = CloseHandle(handle);
-        }
-        None
-    }
-}
-
 fn get_priority(inst: Instance) -> Option<u32> {
-    let handle = open(inst)?;
+    let process = open_instance(inst, PROCESS_QUERY_LIMITED_INFORMATION)?;
     let mut info = MEMORY_PRIORITY_INFORMATION::default();
-    let res = unsafe {
+    unsafe {
         GetProcessInformation(
-            handle,
+            process.raw(),
             ProcessMemoryPriority,
             &mut info as *mut _ as *mut _,
             size_of::<MEMORY_PRIORITY_INFORMATION>() as u32,
         )
-    };
-    unsafe {
-        let _ = CloseHandle(handle);
     }
-    res.ok().map(|_| info.MemoryPriority.0)
+    .ok()?;
+    Some(info.MemoryPriority.0)
 }
 
 fn set_priority(inst: Instance, priority: u32) -> bool {
-    let Some(handle) = open(inst) else { return false };
+    let Some(process) = open_instance(inst, PROCESS_SET_INFORMATION) else { return false };
     let info = MEMORY_PRIORITY_INFORMATION { MemoryPriority: MEMORY_PRIORITY(priority) };
-    let res = unsafe {
+    unsafe {
         SetProcessInformation(
-            handle,
+            process.raw(),
             ProcessMemoryPriority,
             &info as *const _ as *const _,
             size_of::<MEMORY_PRIORITY_INFORMATION>() as u32,
         )
-    };
-    unsafe {
-        let _ = CloseHandle(handle);
     }
-    res.is_ok()
+    .is_ok()
 }
-
 #[cfg(test)]
 mod tests {
     use std::process::{Child, Command};
     use std::time::Duration;
+
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{GetProcessTimes, OpenProcess};
 
     use super::*;
     use crate::classify::Category;
@@ -255,6 +231,7 @@ mod tests {
             cpu_pct: 0.0,
             status,
             lowered: false,
+            audio: false,
         }
     }
 

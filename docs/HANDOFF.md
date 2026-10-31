@@ -53,6 +53,8 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `src/classify.rs` | 依執行檔名分組成「應用程式」、WebView2 歸屬到擁有者、分類（系統／安全／虛擬機／服務／瀏覽器／Web 技術／一般） |
 | `src/activity.rs` | 跨取樣追蹤 CPU、I/O、前景，判定使用中／不活躍／閒置 |
 | `src/priority.rs` | `Governor`：降低／還原記憶體優先權、自動還原、當機還原紀錄檔（M4） |
+| `src/trim.rs` | 修剪長時間閒置程式的工作集，在背景執行緒進行並回報實際移出量（M5） |
+| `src/audio.rs` | Core Audio：找出有作用中播放／錄音工作階段的程序（M5） |
 | `src/theme.rs` | 深色主題配色、依語言載入 Windows 系統字型 |
 | `src/i18n.rs` | 語言列舉、偵測 Windows 顯示語言 |
 | `locales/*.yml` | 介面文字（每語言一檔，缺字回退英文） |
@@ -60,8 +62,8 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 
 ## 5. 開發慣例
 
-- **寫入界線**：會改變其他程序的操作只能放在 `priority.rs`（M5 起另加專屬模組），只能由使用者觸發，
-  而且必須可以還原。其他模組開啟程序只能用 `PROCESS_QUERY_LIMITED_INFORMATION`。
+- **寫入界線**：會改變其他程序的操作只能放在 `priority.rs`（優先權）與 `trim.rs`（修剪），只能由使用者觸發，
+  且不得留下無法還原的狀態。開啟程序一律經 `process::open_instance`（檢查 PID + 啟動時間）。其他模組開啟程序只能用 `PROCESS_QUERY_LIMITED_INFORMATION`。
   `Governor` 由 UI 與取樣執行緒共用（`Arc<Mutex<_>>`）；UI 的操作先收集成 `Action`，畫面繪製完再套用。
 - **i18n**：使用者看得到的字串一律加入四個 `locales/*.yml`，用 `t!("key", name = value)`。
   鍵名用「區塊.項目」（例如 `kpi.commit.title`）。
@@ -99,7 +101,9 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
    .\scripts\capture-window.ps1 -Exe .\target\debug\memwarden.exe -OutDir .\screenshots -Langs zh-TW,en,ja,ko
    ```
    這個腳本用 `PrintWindow` 只擷取 memwarden 視窗，不會截到其他視窗。
-3. 發佈版量測自身記憶體（工作管理員或 `Get-Process memwarden`）。
+   閒置狀態需要 `-WaitSeconds 370`（5 分鐘以上）；修剪按鈕需要 `-WaitSeconds 970`（15 分鐘以上）。
+3. 音訊偵測可對真實系統執行診斷：`cargo test audio -- --ignored --nocapture`（印出正在播放／錄音的 PID）。
+4. 發佈版量測自身記憶體（工作管理員或 `Get-Process memwarden`）。
 
 ## 8. 已知問題與限制
 

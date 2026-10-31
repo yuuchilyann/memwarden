@@ -14,6 +14,7 @@ use crate::activity::Status;
 use crate::classify::{AppUsage, Category};
 use crate::i18n::Lang;
 use crate::priority::Governor;
+use crate::trim;
 use crate::sampler::{self, Snapshot};
 use crate::theme::{
     self, AMBER, BLUE, CARD, CARD_BORDER, CRITICAL_PCT, CYAN, GREEN, MUTED, RED, SLATE, TRACK, VIOLET,
@@ -38,16 +39,33 @@ pub struct App {
     filter: Filter,
     lang: Lang,
     governor: Arc<Mutex<Governor>>,
-    /// The "lower all idle" button is waiting for confirmation.
-    confirm_bulk: bool,
+    controls: Controls,
 }
 
-/// User actions on memory priority, applied after the frame is drawn.
+/// State of the priority and trim controls.
+#[derive(Default)]
+struct Controls {
+    /// Bulk action waiting for confirmation.
+    confirm: Option<Bulk>,
+    /// Running trim, if any.
+    trimming: Option<Receiver<trim::Report>>,
+    last_trim: Option<trim::Report>,
+}
+
+#[derive(Clone, Copy)]
+enum Bulk {
+    Lower,
+    Trim,
+}
+
+/// User actions, applied after the frame is drawn.
 enum Action {
     Lower(String),
     Restore(String),
     LowerAllIdle,
     RestoreAll,
+    Trim(String),
+    TrimLongIdle,
 }
 
 fn lock(governor: &Mutex<Governor>) -> MutexGuard<'_, Governor> {
@@ -95,7 +113,7 @@ impl App {
             filter: Filter::default(),
             lang,
             governor,
-            confirm_bulk: false,
+            controls: Controls::default(),
         }
     }
 
@@ -131,6 +149,14 @@ impl App {
                     gov.failed = failed;
                 }
                 Action::RestoreAll => gov.restore_all(),
+                Action::Trim(name) => {
+                    let targets: Vec<_> = snap.apps.iter().filter(|a| a.name == name).cloned().collect();
+                    start_trim(&mut self.controls, targets);
+                }
+                Action::TrimLongIdle => {
+                    let targets: Vec<_> = snap.apps.iter().filter(|a| trim::eligible(a)).cloned().collect();
+                    start_trim(&mut self.controls, targets);
+                }
             }
         }
         // Show the change now instead of waiting for the next sample.
@@ -140,9 +166,21 @@ impl App {
     }
 }
 
+/// Starts a trim unless one is already running.
+fn start_trim(controls: &mut Controls, targets: Vec<AppUsage>) {
+    if controls.trimming.is_none() && !targets.is_empty() {
+        controls.last_trim = None;
+        controls.trimming = Some(trim::spawn(targets));
+    }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.drain_samples();
+        if let Some(report) = self.controls.trimming.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.controls.last_trim = Some(report);
+            self.controls.trimming = None;
+        }
         // Keeps the "updated N s ago" label ticking between samples.
         ui.ctx().request_repaint_after(Duration::from_secs(1));
 
@@ -150,7 +188,7 @@ impl eframe::App for App {
             let gov = lock(&self.governor);
             (gov.lowered_count(), gov.failed)
         };
-        let Self { latest, history, filter, started, lang, confirm_bulk, .. } = self;
+        let Self { latest, history, filter, started, lang, controls, .. } = self;
 
         let picked = egui::Panel::top("header")
             .frame(Frame::new().fill(theme::BG).inner_margin(Margin::symmetric(20, 14)))
@@ -184,7 +222,7 @@ impl eframe::App for App {
                             strip.cell(|ui| top_card(ui, &snap.apps));
                         });
                 });
-                actions = apps_card(ui, snap, filter, confirm_bulk, (lowered, failed));
+                actions = apps_card(ui, snap, filter, controls, (lowered, failed));
             });
         if !actions.is_empty() {
             self.apply(actions);
@@ -419,7 +457,9 @@ fn status_text(app: &AppUsage) -> RichText {
         Status::Inactive => (t!("activity.inactive"), MUTED),
         Status::Idle(quiet) => (t!("activity.idle", min = quiet.as_secs() / 60), AMBER),
     };
-    // An arrow marks apps whose memory priority memwarden lowered.
+    // A note marks apps with an active audio session; an arrow marks apps
+    // whose memory priority memwarden lowered.
+    let text = if app.audio { format!("♪ {text}") } else { text.into_owned() };
     if app.lowered { RichText::new(format!("↓ {text}")).color(VIOLET) } else { RichText::new(text).color(color) }
 }
 
@@ -428,7 +468,7 @@ fn apps_card(
     ui: &mut Ui,
     snap: &Snapshot,
     filter: &mut Filter,
-    confirm_bulk: &mut bool,
+    controls: &mut Controls,
     priority: (usize, usize),
 ) -> Vec<Action> {
     let mut actions = Vec::new();
@@ -438,13 +478,25 @@ fn apps_card(
             .iter()
             .filter(|a| is_idle_candidate(a))
             .fold((0usize, 0u64), |acc, a| (acc.0 + 1, acc.1 + a.private));
+        let (trim_count, trim_bytes) = snap
+            .apps
+            .iter()
+            .filter(|a| trim::eligible(a))
+            .fold((0usize, 0u64), |acc, a| (acc.0 + 1, acc.1 + a.working_set));
         let (lowered, failed) = priority;
+        let trimming = controls.trimming.is_some();
 
         ui.horizontal(|ui| {
             card_title(ui, &t!("apps.title"));
             ui.label(RichText::new(t!("apps.entries", count = snap.apps.len())).size(12.0).color(MUTED));
             if idle_count > 0 {
                 chip(ui, &t!("apps.idle_summary", count = idle_count, size = fmt_bytes(idle_bytes)), AMBER);
+            }
+            if let Some(r) = &controls.last_trim {
+                chip(ui, &t!("trim.result", count = r.apps, size = fmt_bytes(r.freed)), GREEN);
+                if r.failed > 0 {
+                    ui.label(RichText::new(t!("priority.failed", count = r.failed)).size(12.0).color(MUTED));
+                }
             }
             if snap.denied > 0 {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -466,25 +518,55 @@ fn apps_card(
                 });
             ui.checkbox(&mut filter.idle_only, t!("apps.idle_only"));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if *confirm_bulk {
+                if let Some(bulk) = controls.confirm {
                     if ui.button(t!("priority.cancel")).clicked() {
-                        *confirm_bulk = false;
+                        controls.confirm = None;
                     }
-                    if ui.button(RichText::new(t!("priority.confirm_yes")).color(AMBER)).clicked() {
-                        actions.push(Action::LowerAllIdle);
-                        *confirm_bulk = false;
+                    let (yes, question, action) = match bulk {
+                        Bulk::Lower => (
+                            t!("priority.confirm_yes"),
+                            t!("priority.confirm", count = idle_count, size = fmt_bytes(idle_bytes)),
+                            Action::LowerAllIdle,
+                        ),
+                        Bulk::Trim => (
+                            t!("trim.confirm_yes"),
+                            t!(
+                                "trim.confirm",
+                                count = trim_count,
+                                min = trim::TRIM_AFTER.as_secs() / 60,
+                                size = fmt_bytes(trim_bytes)
+                            ),
+                            Action::TrimLongIdle,
+                        ),
+                    };
+                    if ui.button(RichText::new(yes).color(AMBER)).clicked() {
+                        actions.push(action);
+                        controls.confirm = None;
                     }
-                    ui.label(t!("priority.confirm", count = idle_count, size = fmt_bytes(idle_bytes)));
+                    ui.label(question);
                     return;
+                }
+                let trim_all = ui
+                    .add_enabled(
+                        trim_count > 0 && !trimming,
+                        egui::Button::new(t!("trim.all", count = trim_count)),
+                    )
+                    .on_hover_text(t!("trim.explain", min = trim::TRIM_AFTER.as_secs() / 60));
+                if trim_all.clicked() {
+                    controls.confirm = Some(Bulk::Trim);
                 }
                 if lowered > 0 && ui.button(t!("priority.restore_all", count = lowered)).clicked() {
                     actions.push(Action::RestoreAll);
                 }
-                let bulk = ui
+                let lower_all = ui
                     .add_enabled(idle_count > 0, egui::Button::new(t!("priority.lower_all", count = idle_count)))
                     .on_hover_text(t!("priority.explain"));
-                if bulk.clicked() {
-                    *confirm_bulk = true;
+                if lower_all.clicked() {
+                    controls.confirm = Some(Bulk::Lower);
+                }
+                if trimming {
+                    ui.label(RichText::new(t!("trim.running")).size(12.0).color(MUTED));
+                    ui.spinner();
                 }
                 if failed > 0 {
                     ui.label(RichText::new(t!("priority.failed", count = failed)).size(12.0).color(MUTED));
@@ -512,8 +594,8 @@ fn apps_card(
             .column(Column::exact(96.0))
             .column(Column::exact(100.0))
             .column(Column::exact(124.0))
-            .column(Column::exact(130.0))
-            .column(Column::exact(140.0))
+            .column(Column::exact(180.0))
+            .column(Column::exact(120.0))
             .header(26.0, |mut h| {
                 for (key, align_right) in [
                     ("col.name", false),
@@ -567,6 +649,14 @@ fn apps_card(
                             let button = ui.small_button(t!("priority.lower")).on_hover_text(t!("priority.explain"));
                             if button.clicked() {
                                 actions.push(Action::Lower(a.name.clone()));
+                            }
+                        }
+                        if trim::eligible(a) {
+                            let button = ui
+                                .add_enabled(!trimming, egui::Button::new(t!("trim.button")).small())
+                                .on_hover_text(t!("trim.explain", min = trim::TRIM_AFTER.as_secs() / 60));
+                            if button.clicked() {
+                                actions.push(Action::Trim(a.name.clone()));
                             }
                         }
                     });

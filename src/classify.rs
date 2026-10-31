@@ -88,6 +88,8 @@ pub struct AppUsage {
     pub status: Status,
     /// Memory priority lowered by memwarden. Set by the priority governor.
     pub lowered: bool,
+    /// Has an active audio session (playing or recording). Set by the activity tracker.
+    pub audio: bool,
 }
 
 struct Group {
@@ -121,6 +123,7 @@ pub fn group(procs: &[ProcessInfo]) -> (Vec<AppUsage>, usize) {
                 cpu_pct: 0.0,
                 status: Status::Active,
                 lowered: false,
+                audio: false,
             },
             web_engine: false,
             all_services: true,

@@ -12,6 +12,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 
 mod activity;
 mod app;
+mod audio;
 mod classify;
 mod i18n;
 mod priority;
@@ -19,6 +20,7 @@ mod process;
 mod sampler;
 mod system;
 mod theme;
+mod trim;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {

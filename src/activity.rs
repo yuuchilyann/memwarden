@@ -89,10 +89,18 @@ impl Tracker {
         }
     }
 
-    /// Fills `cpu_pct` and `status` of each application.
+    /// Fills `cpu_pct`, `audio` and `status` of each application.
+    /// Foreground use and active audio sessions always count as activity.
     /// Applications seen for the first time count as active from `now`, so
     /// nothing is reported idle before it has been observed for `IDLE_AFTER`.
-    pub fn update(&mut self, procs: &[ProcessInfo], apps: &mut [AppUsage], foreground: Option<u32>, now: Instant) {
+    pub fn update(
+        &mut self,
+        procs: &[ProcessInfo],
+        apps: &mut [AppUsage],
+        foreground: Option<u32>,
+        audio: &HashSet<u32>,
+        now: Instant,
+    ) {
         let secs = self.last_sample.map_or(0.0, |t| (now - t).as_secs_f64());
         self.last_sample = Some(now);
 
@@ -124,7 +132,9 @@ impl Tracker {
             let key = app.name.to_lowercase();
             let state = self.apps.entry(key.clone()).or_insert_with(|| AppState::new(now));
             let (avg_cpu, avg_io) = state.push(now, cpu, io);
-            let active = foreground.is_some_and(|fg| app.instances.iter().any(|&(pid, _)| pid == fg))
+            app.audio = app.instances.iter().any(|(pid, _)| audio.contains(pid));
+            let active = app.audio
+                || foreground.is_some_and(|fg| app.instances.iter().any(|&(pid, _)| pid == fg))
                 || avg_cpu >= ACTIVE_CPU_PCT_OF_CORE
                 || avg_io >= ACTIVE_IO_BYTES_PER_SEC;
             if active {
@@ -164,6 +174,7 @@ mod tests {
             cpu_pct: 0.0,
             status: Status::Active,
             lowered: false,
+            audio: false,
         }
     }
 
@@ -180,21 +191,21 @@ mod tests {
         let start = Instant::now();
         let mut apps = [app(&[1])];
 
-        t.update(&[proc(1, 0, 0)], &mut apps, None, start);
+        t.update(&[proc(1, 0, 0)], &mut apps, None, &HashSet::new(), start);
         assert_eq!(apps[0].status, Status::Active, "first sighting counts as active");
 
         let later = start + IDLE_AFTER + Duration::from_secs(1);
-        t.update(&[proc(1, 0, 0)], &mut apps, None, later);
+        t.update(&[proc(1, 0, 0)], &mut apps, None, &HashSet::new(), later);
         assert!(matches!(apps[0].status, Status::Idle(_)));
 
         // 1 s of CPU is a wake-up: about 3% of a core over the 30 s window.
         let blip = later + Duration::from_secs(2);
-        t.update(&[proc(1, 10_000_000, 0)], &mut apps, None, blip);
+        t.update(&[proc(1, 10_000_000, 0)], &mut apps, None, &HashSet::new(), blip);
         assert!(matches!(apps[0].status, Status::Idle(_)), "brief wake-up keeps the app idle");
 
         // 1 s more of CPU brings the window average above 5% of a core.
         let busy = blip + Duration::from_secs(2);
-        t.update(&[proc(1, 20_000_000, 0)], &mut apps, None, busy);
+        t.update(&[proc(1, 20_000_000, 0)], &mut apps, None, &HashSet::new(), busy);
         assert_eq!(apps[0].status, Status::Active);
     }
 
@@ -203,9 +214,9 @@ mod tests {
         let mut t = Tracker::new();
         let start = Instant::now();
         let mut apps = [app(&[1, 2])];
-        t.update(&[proc(1, 0, 0), proc(2, 0, 0)], &mut apps, None, start);
+        t.update(&[proc(1, 0, 0), proc(2, 0, 0)], &mut apps, None, &HashSet::new(), start);
         let later = start + IDLE_AFTER * 2;
-        t.update(&[proc(1, 0, 0), proc(2, 0, 0)], &mut apps, Some(2), later);
+        t.update(&[proc(1, 0, 0), proc(2, 0, 0)], &mut apps, Some(2), &HashSet::new(), later);
         assert_eq!(apps[0].status, Status::Active);
     }
 
@@ -214,11 +225,23 @@ mod tests {
         let mut t = Tracker::new();
         let start = Instant::now();
         let mut apps = [app(&[1])];
-        t.update(&[proc(1, 0, 0)], &mut apps, None, start);
+        t.update(&[proc(1, 0, 0)], &mut apps, None, &HashSet::new(), start);
         // A helper with a large lifetime CPU total appears after the app went idle.
         let later = start + IDLE_AFTER + Duration::from_secs(1);
         let mut apps = [app(&[1, 2])];
-        t.update(&[proc(1, 0, 0), proc(2, 50_000_000, 0)], &mut apps, None, later);
+        t.update(&[proc(1, 0, 0), proc(2, 50_000_000, 0)], &mut apps, None, &HashSet::new(), later);
         assert!(matches!(apps[0].status, Status::Idle(_)));
+    }
+
+    #[test]
+    fn audio_keeps_an_app_active() {
+        let mut t = Tracker::new();
+        let start = Instant::now();
+        let mut apps = [app(&[1])];
+        t.update(&[proc(1, 0, 0)], &mut apps, None, &HashSet::new(), start);
+        let later = start + IDLE_AFTER * 2;
+        t.update(&[proc(1, 0, 0)], &mut apps, None, &HashSet::from([1]), later);
+        assert!(apps[0].audio);
+        assert_eq!(apps[0].status, Status::Active);
     }
 }

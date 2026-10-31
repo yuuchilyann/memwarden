@@ -3,8 +3,8 @@
 Windows memory dashboard written in Rust.
 
 > Status: early prototype. memwarden never suspends or terminates processes.
-> The only change it can make is lowering the memory priority of idle apps,
-> and only when you ask; every change is restored automatically.
+> The only changes it can make are lowering the memory priority of idle apps
+> and trimming their working sets, and only when you ask.
 
 ## Features (current)
 
@@ -20,12 +20,16 @@ Windows memory dashboard written in Rust.
   reclaims their memory first when RAM runs low. Priority is restored when the
   app is used again, on request, when memwarden exits, or after a crash on the
   next start. Note: this does not reduce commit charge.
+- Trim the working sets of apps idle for 15+ minutes, per app or all at once:
+  their memory leaves RAM immediately and is read back when used again. The
+  dashboard reports how much was actually moved out.
+- Apps playing or recording audio count as in use, so they are never lowered
+  or trimmed.
 - UI languages: 繁體中文, English, 日本語, 한국어
 
 ## Roadmap
 
-1. Optional working-set trimming for long-idle background apps
-2. Browser companion extension for tab-level analysis and tab discarding
+1. Browser companion extension for tab-level analysis and tab discarding
 
 ## Build
 

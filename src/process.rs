@@ -12,9 +12,55 @@ use windows::Win32::System::ProcessStatus::{
 };
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{
-    GetProcessIoCounters, GetProcessTimes, IO_COUNTERS, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetProcessIoCounters, GetProcessTimes, IO_COUNTERS, OpenProcess, PROCESS_ACCESS_RIGHTS,
+    PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
+/// Process instance: PID plus start time, so a reused PID is never touched.
+pub type Instance = (u32, u64);
+
+/// Process handle closed on drop.
+pub struct OwnedProcess(HANDLE);
+
+impl OwnedProcess {
+    pub fn raw(&self) -> HANDLE {
+        self.0
+    }
+
+    #[cfg(test)]
+    pub fn from_raw(handle: HANDLE) -> Self {
+        Self(handle)
+    }
+}
+
+impl Drop for OwnedProcess {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+/// Opens a process with `access` (plus limited query) only if it is still
+/// the same instance, so a reused PID is never acted on.
+pub fn open_instance(inst: Instance, access: PROCESS_ACCESS_RIGHTS) -> Option<OwnedProcess> {
+    let (pid, created) = inst;
+    let process = OwnedProcess(unsafe { OpenProcess(access | PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?);
+    let (mut c, mut e, mut k, mut u) = Default::default();
+    unsafe { GetProcessTimes(process.raw(), &mut c, &mut e, &mut k, &mut u) }.ok()?;
+    (ticks(c) == created).then_some(process)
+}
+
+/// Current working set of an open process, in bytes.
+pub fn working_set(process: &OwnedProcess) -> Option<u64> {
+    let mut pmc = PROCESS_MEMORY_COUNTERS {
+        cb: size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        ..Default::default()
+    };
+    unsafe { GetProcessMemoryInfo(process.raw(), &mut pmc, pmc.cb) }.ok()?;
+    Some(pmc.WorkingSetSize as u64)
+}
 
 pub struct ProcessInfo {
     pub pid: u32,

@@ -292,9 +292,13 @@ mod tests {
     #[test]
     fn reused_pid_is_not_touched() {
         let (mut child, (pid, created)) = spawn_child();
+        // Children inherit the parent's memory priority, which is already Low
+        // on some CI runners, so ask for a value the child does not have.
+        let original = get_priority((pid, created)).unwrap();
+        let other = if original == LOWERED.0 { LOWERED.0 + 1 } else { LOWERED.0 };
         // Same PID, different start time: must be treated as another process.
-        assert!(!set_priority((pid, created + 1), LOWERED.0));
-        assert_ne!(get_priority((pid, created)), Some(LOWERED.0));
+        assert!(!set_priority((pid, created + 1), other));
+        assert_eq!(get_priority((pid, created)), Some(original));
         let _ = child.kill();
     }
 }

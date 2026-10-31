@@ -7,9 +7,6 @@
 //! unsaved work, and may also just hide in the notification area. Processes
 //! are never terminated.
 
-// The UI does not use this module yet (PLAN.md 8.9); remove once it does.
-#![allow(dead_code)]
-
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
@@ -34,10 +31,18 @@ const BACKGROUND_AFTER: Duration = Duration::from_secs(10);
 /// Windows still open this long: the app is probably asking about unsaved work.
 const WAIT: Duration = Duration::from_secs(30);
 
+/// Lower-case executable names never suggested for closing: file sync
+/// clients look idle but keep files in sync in the background.
+const KEEP_RUNNING: &[&str] = &[
+    "onedrive.exe", "dropbox.exe", "googledrivefs.exe", "box.exe", "icloudservices.exe", "iclouddrive.exe",
+    "megasync.exe", "nextcloud.exe", "owncloud.exe",
+];
+
 /// Whether closing `app` is suggested: a long-idle, large application.
 /// Browsers are left out, since discarding tabs keeps the tab strip.
 pub fn suggested(app: &AppUsage) -> bool {
     matches!(app.category, Category::Application | Category::WebApp)
+        && !KEEP_RUNNING.contains(&app.name.to_lowercase().as_str())
         && matches!(app.status, Status::Idle(quiet) if quiet >= SUGGEST_AFTER)
         && app.private >= SUGGEST_MIN_PRIVATE
         && !app.audio
@@ -207,6 +212,13 @@ mod tests {
         for category in [Category::Browser, Category::System, Category::Security, Category::VirtualMachine, Category::Service] {
             assert!(!suggested(&app(category, idle, 2_000 * MB)), "{category:?}");
         }
+    }
+
+    #[test]
+    fn sync_clients_are_never_suggested() {
+        let mut onedrive = app(Category::Application, Status::Idle(SUGGEST_AFTER * 2), 2_000 * MB);
+        onedrive.name = "OneDrive.exe".into();
+        assert!(!suggested(&onedrive));
     }
 
     #[test]

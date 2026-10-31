@@ -10,6 +10,7 @@ use eframe::egui;
 use crate::activity::Tracker;
 use crate::audio;
 use crate::classify::{self, AppUsage};
+use crate::pagefile::{self, PageFiles};
 use crate::priority::Governor;
 use crate::process::{self, Collector};
 use crate::system::{self, SystemMemory};
@@ -19,6 +20,8 @@ pub struct Snapshot {
     pub sys: SystemMemory,
     pub apps: Vec<AppUsage>,
     pub denied: usize,
+    /// `None` when the settings cannot be read.
+    pub pagefile: Option<PageFiles>,
 }
 
 /// Starts sampling every `interval`; the UI is woken after each new snapshot.
@@ -36,7 +39,8 @@ pub fn spawn(ctx: egui::Context, interval: Duration, governor: Arc<Mutex<Governo
                     let (mut apps, denied) = classify::group(&procs);
                     tracker.update(&procs, &mut apps, process::foreground_pid(), &audio::active_pids(), now);
                     governor.lock().unwrap_or_else(|e| e.into_inner()).sync(&mut apps);
-                    let snap = Snapshot { taken: now, sys, apps, denied };
+                    let pagefile = pagefile::query(sys.phys_total);
+                    let snap = Snapshot { taken: now, sys, apps, denied, pagefile };
                     if tx.send(snap).is_err() {
                         break; // UI closed
                     }

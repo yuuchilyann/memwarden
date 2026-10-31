@@ -19,6 +19,7 @@ mod close;
 mod i18n;
 mod integration;
 mod priority;
+mod pagefile;
 mod process;
 mod sampler;
 mod system;

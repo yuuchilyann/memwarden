@@ -1,6 +1,6 @@
 //! Dashboard UI.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -13,8 +13,10 @@ use rust_i18n::t;
 use crate::activity::Status;
 use crate::bridge::{Bridge, BrowserTabs, Discard};
 use crate::classify::{AppUsage, Category};
+use crate::close::{self, Closing, Outcome, Refusal};
 use crate::i18n::Lang;
 use crate::integration::{self, Integration};
+use crate::pagefile;
 use crate::priority::Governor;
 use crate::process::Instance;
 use crate::trim;
@@ -68,6 +70,19 @@ struct Controls {
     trimming: Option<Receiver<trim::Report>>,
     last_trim: Option<trim::Report>,
     last_discard: Option<DiscardRun>,
+    /// Close request waiting for the app to exit; one at a time.
+    closing: Option<Closing>,
+    last_close: Option<CloseResult>,
+    /// Why a suggested app cannot be closed, refreshed with every sample.
+    close_blockers: HashMap<String, Refusal>,
+}
+
+/// How the latest close request ended.
+struct CloseResult {
+    name: String,
+    /// Private bytes of the app when closing was requested.
+    private: u64,
+    result: Result<Outcome, Refusal>,
 }
 
 /// Latest tab discard request and its measured effect.
@@ -79,11 +94,12 @@ struct DiscardRun {
     change: Option<i64>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Bulk {
     Lower,
     Trim,
     Discard(Instance),
+    Close(String),
 }
 
 /// User actions, applied after the frame is drawn.
@@ -95,6 +111,7 @@ enum Action {
     Trim(String),
     TrimLongIdle,
     DiscardTabs(Instance),
+    Close(String),
 }
 
 fn lock(governor: &Mutex<Governor>) -> MutexGuard<'_, Governor> {
@@ -108,6 +125,7 @@ struct Filter {
     text: String,
     category: Option<Category>,
     idle_only: bool,
+    close_only: bool,
 }
 
 impl Filter {
@@ -115,6 +133,7 @@ impl Filter {
         (needle.is_empty() || app.name.to_lowercase().contains(needle))
             && self.category.is_none_or(|c| c == app.category)
             && (!self.idle_only || is_idle_candidate(app))
+            && (!self.close_only || close::suggested(app))
     }
 }
 
@@ -156,14 +175,42 @@ impl App {
         }
     }
 
-    fn drain_samples(&mut self) {
+    /// Returns whether a new snapshot arrived.
+    fn drain_samples(&mut self) -> bool {
+        let mut new = false;
         while let Ok(snap) = self.rx.try_recv() {
+            new = true;
             let t = snap.taken.duration_since(self.started).as_secs_f64();
             self.history.push_back([t, snap.sys.phys_pct(), snap.sys.commit_pct()]);
             if self.history.len() > HISTORY_LEN {
                 self.history.pop_front();
             }
             self.latest = Some(snap);
+        }
+        new
+    }
+
+    /// Follows a running close request and finds suggested apps that cannot
+    /// be closed, once per sample rather than every frame.
+    fn update_close(&mut self) {
+        let Some(snap) = self.latest.as_ref() else { return };
+        let c = &mut self.controls;
+        c.close_blockers = snap
+            .apps
+            .iter()
+            .filter(|a| close::suggested(a))
+            .filter_map(|a| close::blocker(&a.instances).map(|r| (a.name.clone(), r)))
+            .collect();
+        let done = c.closing.as_mut().and_then(|closing| {
+            closing.poll(Instant::now()).map(|outcome| CloseResult {
+                name: closing.name.clone(),
+                private: closing.private,
+                result: Ok(outcome),
+            })
+        });
+        if done.is_some() {
+            c.last_close = done;
+            c.closing = None;
         }
     }
 
@@ -204,6 +251,22 @@ impl App {
                         self.controls.last_discard = Some(DiscardRun { browser, before, change: None });
                     }
                 }
+                Action::Close(name) => {
+                    if self.controls.closing.is_none()
+                        && let Some(app) = snap.apps.iter().find(|a| a.name == name)
+                    {
+                        let private = app.private;
+                        match close::request(app, Instant::now()) {
+                            Ok(closing) => {
+                                self.controls.last_close = None;
+                                self.controls.closing = Some(closing);
+                            }
+                            Err(refusal) => {
+                                self.controls.last_close = Some(CloseResult { name, private, result: Err(refusal) });
+                            }
+                        }
+                    }
+                }
             }
         }
         // Show the change now instead of waiting for the next sample.
@@ -240,7 +303,9 @@ fn start_trim(controls: &mut Controls, targets: Vec<AppUsage>) {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        self.drain_samples();
+        if self.drain_samples() {
+            self.update_close();
+        }
         if let Some(report) = self.controls.trimming.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.controls.last_trim = Some(report);
             self.controls.trimming = None;
@@ -280,7 +345,7 @@ impl eframe::App for App {
                 };
                 kpi_row(ui, snap);
                 if snap.sys.commit_pct() >= CRITICAL_PCT {
-                    commit_alert(ui, snap.sys.commit_pct());
+                    commit_alert(ui, snap);
                 }
                 ui.allocate_ui(vec2(ui.available_width(), 280.0), |ui| {
                     StripBuilder::new(ui)
@@ -451,7 +516,7 @@ fn kpi_row(ui: &mut Ui, snap: &Snapshot) {
         kpi(
             &mut cols[1],
             &t!("kpi.commit.title"),
-            &t!("kpi.commit.help"),
+            &commit_help(snap),
             fmt_bytes(s.commit_total),
             &t!("kpi.commit.detail", limit = fmt_bytes(s.commit_limit), pct = format!("{commit:.0}")),
             Some((commit / 100.0, theme::level_color(commit))),
@@ -475,7 +540,26 @@ fn kpi_row(ui: &mut Ui, snap: &Snapshot) {
     });
 }
 
-fn commit_alert(ui: &mut Ui, pct: f64) {
+/// Commit card explanation plus what the page file settings allow.
+fn commit_help(snap: &Snapshot) -> String {
+    let help = t!("kpi.commit.help");
+    let Some(pf) = &snap.pagefile else { return help.into_owned() };
+    let (current, max) = (fmt_bytes(pf.current()), fmt_bytes(pf.max()));
+    let limit = fmt_bytes(pf.potential_limit(snap.sys.commit_limit));
+    let note = if pf.0.is_empty() {
+        t!("pagefile.none")
+    } else if pf.system_managed() {
+        t!("pagefile.system", current = current, max = max, limit = limit)
+    } else {
+        t!("pagefile.custom", current = current, max = max, limit = limit)
+    };
+    format!("{help}\n\n{note}")
+}
+
+fn commit_alert(ui: &mut Ui, snap: &Snapshot) {
+    let pct = format!("{:.0}", snap.sys.commit_pct());
+    // Windows grows a page file it manages on its own; otherwise only the user can.
+    let growable = snap.pagefile.as_ref().filter(|pf| pf.system_managed() && pf.max() > pf.current());
     Frame::new()
         .fill(RED.gamma_multiply(0.12))
         .stroke(Stroke::new(1.0, RED.gamma_multiply(0.6)))
@@ -483,7 +567,16 @@ fn commit_alert(ui: &mut Ui, pct: f64) {
         .inner_margin(Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(t!("alert.commit", pct = format!("{pct:.0}"))).color(RED));
+            if let Some(pf) = growable {
+                let limit = fmt_bytes(pf.potential_limit(snap.sys.commit_limit));
+                ui.label(RichText::new(t!("alert.commit_auto", pct = pct, limit = limit)).color(RED));
+                return;
+            }
+            ui.label(RichText::new(t!("alert.commit", pct = pct)).color(RED));
+            if ui.button(t!("pagefile.open")).on_hover_text(t!("pagefile.open_help")).clicked() {
+                // The dialog is part of Windows; if it cannot start there is nothing more to offer.
+                let _ = pagefile::open_settings();
+            }
         });
 }
 
@@ -550,12 +643,13 @@ fn category_color(c: Category) -> Color32 {
 }
 
 /// Small rounded label with a tinted background.
-fn chip(ui: &mut Ui, text: &str, color: Color32) {
+fn chip(ui: &mut Ui, text: &str, color: Color32) -> egui::Response {
     Frame::new()
         .fill(color.gamma_multiply(0.16))
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::symmetric(8, 2))
-        .show(ui, |ui| ui.label(RichText::new(text).size(11.5).color(color)));
+        .show(ui, |ui| ui.label(RichText::new(text).size(11.5).color(color)))
+        .response
 }
 
 fn status_text(app: &AppUsage) -> RichText {
@@ -563,6 +657,7 @@ fn status_text(app: &AppUsage) -> RichText {
         return RichText::new("—").color(MUTED);
     }
     let (text, color) = match app.status {
+        _ if close::suggested(app) => (t!("close.status"), RED),
         Status::Active => (t!("activity.active"), GREEN),
         Status::Inactive => (t!("activity.inactive"), MUTED),
         Status::Idle(quiet) => (t!("activity.idle", min = quiet.as_secs() / 60), AMBER),
@@ -595,6 +690,11 @@ fn apps_card(
             .iter()
             .filter(|a| trim::eligible(a))
             .fold((0usize, 0u64), |acc, a| (acc.0 + 1, acc.1 + a.working_set));
+        let (close_count, close_bytes) = snap
+            .apps
+            .iter()
+            .filter(|a| close::suggested(a))
+            .fold((0usize, 0u64), |acc, a| (acc.0 + 1, acc.1 + a.private));
         let (lowered, failed) = priority;
         let trimming = controls.trimming.is_some();
 
@@ -603,6 +703,22 @@ fn apps_card(
             ui.label(RichText::new(t!("apps.entries", count = snap.apps.len())).size(12.0).color(MUTED));
             if idle_count > 0 {
                 chip(ui, &t!("apps.idle_summary", count = idle_count, size = fmt_bytes(idle_bytes)), AMBER);
+            }
+            if close_count > 0 {
+                let help = t!(
+                    "close.summary_help",
+                    min = close::SUGGEST_AFTER.as_secs() / 60,
+                    mb = close::SUGGEST_MIN_PRIVATE / (1024 * 1024)
+                );
+                // Apps with only a tray icon count too, but the user has to quit them there.
+                let tray = controls.close_blockers.values().filter(|&&r| r == Refusal::NoWindow).count();
+                let size = fmt_bytes(close_bytes);
+                let summary = if tray > 0 {
+                    t!("close.summary_tray", count = close_count, size = size, tray = tray)
+                } else {
+                    t!("close.summary", count = close_count, size = size)
+                };
+                chip(ui, &summary, RED).on_hover_text(help);
             }
             if let Some(r) = &controls.last_trim {
                 chip(ui, &t!("trim.result", count = r.apps, size = fmt_bytes(r.freed)), GREEN);
@@ -629,8 +745,9 @@ fn apps_card(
                     }
                 });
             ui.checkbox(&mut filter.idle_only, t!("apps.idle_only"));
+            ui.checkbox(&mut filter.close_only, t!("apps.close_only"));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if let Some(bulk) = controls.confirm {
+                if let Some(bulk) = controls.confirm.clone() {
                     if ui.button(t!("priority.cancel")).clicked() {
                         controls.confirm = None;
                     }
@@ -659,6 +776,11 @@ fn apps_card(
                                 Action::DiscardTabs(browser),
                             )
                         }
+                        Bulk::Close(name) => (
+                            t!("close.confirm_yes"),
+                            t!("close.confirm", name = name.as_str()),
+                            Action::Close(name),
+                        ),
                     };
                     if ui.button(RichText::new(yes).color(AMBER)).clicked() {
                         actions.push(action);
@@ -696,6 +818,7 @@ fn apps_card(
         });
 
         tabs_rows(ui, snap, tabs, controls);
+        close_row(ui, controls);
 
         let needle = filter.text.to_lowercase();
         let rows: Vec<&AppUsage> = snap.apps.iter().filter(|a| filter.matches(a, &needle)).collect();
@@ -717,8 +840,8 @@ fn apps_card(
             .column(Column::exact(96.0))
             .column(Column::exact(100.0))
             .column(Column::exact(124.0))
-            .column(Column::exact(180.0))
-            .column(Column::exact(120.0))
+            .column(Column::exact(210.0))
+            .column(Column::exact(110.0))
             .header(26.0, |mut h| {
                 for (key, align_right) in [
                     ("col.name", false),
@@ -754,14 +877,20 @@ fn apps_card(
                     row.col(|ui| {
                         ui.label(&a.name);
                     });
-                    row.col(|ui| chip(ui, &t!(a.category.label_key()), category_color(a.category)));
+                    row.col(|ui| {
+                        chip(ui, &t!(a.category.label_key()), category_color(a.category));
+                    });
                     row.col(|ui| right(ui, RichText::new(a.count.to_string())));
                     row.col(|ui| right(ui, RichText::new(format!("{:.1}%", a.cpu_pct))));
                     row.col(|ui| right(ui, RichText::new(fmt_bytes(a.private))));
                     row.col(|ui| right(ui, RichText::new(fmt_bytes(a.working_set))));
                     row.col(|ui| {
                         ui.add_space(16.0);
-                        ui.label(status_text(a));
+                        let status = ui.label(status_text(a));
+                        if let (true, Status::Idle(quiet)) = (close::suggested(a), a.status) {
+                            let size = fmt_bytes(a.private);
+                            status.on_hover_text(t!("close.status_help", min = quiet.as_secs() / 60, size = size));
+                        }
                     });
                     row.col(|ui| {
                         if a.lowered {
@@ -780,6 +909,19 @@ fn apps_card(
                                 .on_hover_text(t!("trim.explain", min = trim::TRIM_AFTER.as_secs() / 60));
                             if button.clicked() {
                                 actions.push(Action::Trim(a.name.clone()));
+                            }
+                        }
+                        if close::suggested(a) {
+                            let blocker = controls.close_blockers.get(&a.name).copied();
+                            let enabled = blocker.is_none() && controls.closing.is_none() && controls.confirm.is_none();
+                            let mut button = ui
+                                .add_enabled(enabled, egui::Button::new(t!("close.button")).small())
+                                .on_hover_text(t!("close.explain"));
+                            if let Some(refusal) = blocker {
+                                button = button.on_disabled_hover_text(t!(refusal_key(refusal)));
+                            }
+                            if button.clicked() {
+                                controls.confirm = Some(Bulk::Close(a.name.clone()));
                             }
                         }
                     });
@@ -832,5 +974,37 @@ fn tabs_rows(ui: &mut Ui, snap: &Snapshot, (browsers, incompatible): (&[BrowserT
                 _ => {}
             }
         });
+    }
+}
+
+/// Progress or result of the latest close request.
+fn close_row(ui: &mut Ui, controls: &Controls) {
+    if let Some(closing) = &controls.closing {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(RichText::new(t!("close.running", name = closing.name)).size(12.0).color(MUTED));
+        });
+    } else if let Some(r) = &controls.last_close {
+        let name = r.name.as_str();
+        ui.horizontal(|ui| {
+            let note = match r.result {
+                Ok(Outcome::Closed) => {
+                    chip(ui, &t!("close.closed", name = name, size = fmt_bytes(r.private)), GREEN);
+                    return;
+                }
+                Ok(Outcome::InBackground) => t!("close.in_background", name = name),
+                Ok(Outcome::StillOpen) => t!("close.still_open", name = name),
+                Err(refusal) => t!("close.refused", name = name, reason = t!(refusal_key(refusal))),
+            };
+            ui.label(RichText::new(note).size(12.0).color(AMBER));
+        });
+    }
+}
+
+fn refusal_key(refusal: Refusal) -> &'static str {
+    match refusal {
+        Refusal::NoWindow => "close.no_window",
+        Refusal::NotResponding => "close.not_responding",
+        Refusal::Denied => "close.denied",
     }
 }

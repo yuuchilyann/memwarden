@@ -1,0 +1,53 @@
+# ---- Rust build output ----
+/target/
+**/*.rs.bk
+*.pdb
+
+# ---- Secrets / credentials (never commit) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+*.crt
+*.snk
+*.spc
+*.pvk
+secrets.*
+credentials.*
+*.token
+
+# ---- Machine-specific memory data (privacy) ----
+# Reports, snapshots and dumps contain process names, paths, command
+# lines, user names and possibly in-memory content of this machine.
+/reports/
+/snapshots/
+/output/
+*.dmp
+*.mdmp
+*.hdmp
+*.etl
+*.snapshot.json
+*.report.json
+*.report.csv
+*.log
+
+# ---- Local configuration (may contain user paths / allow-lists) ----
+*.local.toml
+
+# ---- Editors / tools ----
+.vscode/
+.idea/
+*.swp
+*.suo
+*.user
+.claude/settings.local.json
+CLAUDE.local.md
+
+# ---- OS files ----
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -26,7 +26,7 @@ use windows::core::{HSTRING, PCWSTR};
 
 const HOST_NAME: &str = "com.memwarden.host";
 /// Extensions allowed to start the host. The unpacked extension's ID is fixed
-/// by the key in extension/manifest.json; store IDs are added at release (M7).
+/// by the key in extension/manifest.json; store IDs are added at release (M8).
 const EXTENSION_IDS: &[&str] = &["jmngjfeoiaihgaabjklldhfmnaejnkga"];
 const BROWSER_KEYS: [&str; 2] = [
     r"Software\Google\Chrome\NativeMessagingHosts\com.memwarden.host",

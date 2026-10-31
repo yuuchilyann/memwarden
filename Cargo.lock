@@ -1708,7 +1708,10 @@ dependencies = [
  "eframe",
  "egui_extras",
  "egui_plot",
+ "memwarden-host",
  "rust-i18n",
+ "serde",
+ "serde_json",
  "sys-locale",
  "windows",
 ]

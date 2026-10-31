@@ -1,9 +1,12 @@
-//! Shared between memwarden-host and memwarden's bridge: message framing and the pipe name.
+//! Shared between memwarden-host and memwarden's bridge: message framing,
+//! the named pipe and identification of the browser behind a pipe client.
 
 #[cfg(not(windows))]
 compile_error!("memwarden-host currently supports Windows only");
 
+pub mod browser;
 pub mod frame;
+pub mod pipe;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
@@ -20,7 +23,7 @@ pub fn pipe_name() -> windows::core::Result<String> {
     Ok(format!(r"\\.\pipe\memwarden-{}", current_user_sid()?))
 }
 
-fn current_user_sid() -> windows::core::Result<String> {
+pub(crate) fn current_user_sid() -> windows::core::Result<String> {
     let mut token = HANDLE::default();
     unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)? };
     let sid = token_user_sid(token);

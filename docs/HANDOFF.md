@@ -15,10 +15,13 @@ Windows 記憶體儀表板（Rust + egui）。可以找出閒置的應用程式�
 |---|---|
 | 作業系統 | Windows 10 以上（開發機：Windows 11 Pro） |
 | Rust | 1.99（edition 2024） |
-| 主要套件 | `eframe`/`egui` 0.37、`egui_plot` 0.38、`egui_extras` 0.37、`windows` 0.62、`rust-i18n` 4 |
+| 主要套件 | `eframe`/`egui` 0.37、`egui_plot` 0.38、`egui_extras` 0.37、`windows` 0.62、`rust-i18n` 4、`serde_json` 1 |
 | Git 作者 | `見未亞由 <yuuchilyann@hotmail.com>`（已由專案擁有者同意公開） |
 
 ## 3. 建置與執行
+
+Cargo workspace：根目錄是 memwarden，`host/` 是 Native Messaging host（`memwarden-host.exe`）。
+`default-members` 包含兩者，所以 `cargo build`／`cargo test` 會一起建置與測試。
 
 ```powershell
 cargo build                     # 偵錯版，會顯示主控台
@@ -40,6 +43,11 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
                   foreground)    ─┘
 ```
 
+```
+瀏覽器擴充功能 ──stdio── memwarden-host.exe ──named pipe── bridge 執行緒（每條連線一個）
+                         （每個瀏覽器設定檔一個）              Bridge::browsers() → apps_card 的分頁列
+```
+
 `Collector` 會快取每個程序實例 `(pid, 啟動時間)` 的 Chromium 旗標，命令列只讀一次。
 `Tracker` 以程序實例計算 CPU／I/O 增量；新出現的程序第一次沒有基準值，不算活動。
 
@@ -55,6 +63,11 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `src/priority.rs` | `Governor`：降低／還原記憶體優先權、自動還原、當機還原紀錄檔（M4） |
 | `src/trim.rs` | 修剪長時間閒置程式的工作集，在背景執行緒進行並回報實際移出量（M5） |
 | `src/audio.rs` | Core Audio：找出有作用中播放／錄音工作階段的程序（M5） |
+| `src/bridge.rs` | 瀏覽器擴充功能的 pipe 伺服器：依 client PID 判定瀏覽器、加總各設定檔的分頁數、轉送使用者觸發的丟棄請求（M6） |
+| `host/src/main.rs` | `memwarden-host.exe`：在擴充功能的 stdio 與 memwarden 的 pipe 之間轉送訊框，不解析內容 |
+| `host/src/frame.rs` | 訊框格式（4 位元組長度 + JSON，上限 64 KB），host 與 bridge 共用 |
+| `host/src/pipe.rs` | named pipe 兩端（overlapped I/O）、只限目前使用者的 DACL |
+| `host/src/browser.rs` | 從 PID 沿父程序往上找出 Chrome／Edge 瀏覽器程序 |
 | `src/theme.rs` | 深色主題配色、依語言載入 Windows 系統字型 |
 | `src/i18n.rs` | 語言列舉、偵測 Windows 顯示語言 |
 | `locales/*.yml` | 介面文字（每語言一檔，缺字回退英文） |
@@ -65,15 +78,22 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 - **寫入界線**：會改變其他程序的操作只能放在 `priority.rs`（優先權）與 `trim.rs`（修剪），只能由使用者觸發，
   且不得留下無法還原的狀態。開啟程序一律經 `process::open_instance`（檢查 PID + 啟動時間）。其他模組開啟程序只能用 `PROCESS_QUERY_LIMITED_INFORMATION`。
   `Governor` 由 UI 與取樣執行緒共用（`Arc<Mutex<_>>`）；UI 的操作先收集成 `Action`，畫面繪製完再套用。
+  `bridge.rs` 不直接改變任何程序，只在使用者按下按鈕時請擴充功能丟棄閒置分頁，實際丟棄由瀏覽器執行。
 - **i18n**：使用者看得到的字串一律加入四個 `locales/*.yml`，用 `t!("key", name = value)`。
   鍵名用「區塊.項目」（例如 `kpi.commit.title`）。
+  翻譯在編譯期內嵌，**只改 `.yml` 不會觸發重新編譯**，介面會顯示鍵名；改完先 `touch src/main.rs`
+  （PowerShell：`(Get-Item src\main.rs).LastWriteTime = Get-Date`）再建置。
+  瀏覽器擴充功能（M6）使用 Chrome 規定的 `extension/_locales/*/messages.json`，同樣四種語言、鍵必須一致。
 - **隱私**：
   - 程序命令列只在記憶體中解析必要旗標（例如 Chromium 的 `--type=`），不得顯示、記錄或寫入檔案。
   - 截圖會含本機程序名稱，不要提交到 repo（`/screenshots/` 已被忽略）。
-  - 程式不得連網。
+  - 程式不得連網。擴充功能 ↔ host ↔ memwarden 只走本機 stdio 與 named pipe
+    （pipe 只允許目前使用者、拒絕遠端連線）。
+  - 分頁的 URL、標題只留在擴充功能內；memwarden 只收到分頁計數。
+  - Native Messaging 的登錄機碼由使用者手動執行註冊腳本寫入，memwarden 與 host 都不寫登錄。
   - 本機只寫入兩個檔案：UI 設定（`%APPDATA%\memwarden`，由 eframe 管理）與還原紀錄檔
     （`%LOCALAPPDATA%\memwarden\lowered-priorities.txt`，只有數字，沒有降低任何程式時會刪除）。
-- **平台程式碼**：Windows API 呼叫集中在 `system.rs`、`process.rs`（及 M3 新增模組），UI 不直接呼叫 Win32。
+- **平台程式碼**：Windows API 呼叫集中在 `system.rs`、`process.rs`（及 M3 新增模組）與 `host/src/`，UI 不直接呼叫 Win32。
 - **字型**：不打包字型檔，執行時讀取 `C:\Windows\Fonts`。
 - **自身占用**：新增功能後用發佈版量測 memwarden 的私有記憶體，目標 < 160 MB。
 
@@ -103,7 +123,10 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
    這個腳本用 `PrintWindow` 只擷取 memwarden 視窗，不會截到其他視窗。
    閒置狀態需要 `-WaitSeconds 370`（5 分鐘以上）；修剪按鈕需要 `-WaitSeconds 970`（15 分鐘以上）。
 3. 音訊偵測可對真實系統執行診斷：`cargo test audio -- --ignored --nocapture`（印出正在播放／錄音的 PID）。
-4. 發佈版量測自身記憶體（工作管理員或 `Get-Process memwarden`）。
+4. 擴充功能完成前，可以用假瀏覽器驗證 bridge 與分頁列：把 `powershell.exe` 複製成暫存目錄裡的 `chrome.exe`，
+   由它啟動 `memwarden-host.exe` 並在收到 `connected:true` 時送出 `tabs` 訊息（格式見 PLAN.md 7.5）。
+   memwarden 會把它當成瀏覽器，在應用程式卡片顯示分頁列。測試完記得結束這些程序。
+5. 發佈版量測自身記憶體（工作管理員或 `Get-Process memwarden`）。
 
 ## 8. 已知問題與限制
 
@@ -116,3 +139,5 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 - 歷史圖例的排序由 egui_plot 依名稱決定，各語言順序不同。
 - UI 沒有自動化測試，靠截圖目視驗證。
 - 閒置門檻（30 秒平均、單核心 5%、512 KB/s、5 分鐘）是依開發機實測訂的經驗值，常數在 `activity.rs` 開頭。
+- 同時開兩個 memwarden 時，只有第一個能建立 pipe，第二個不顯示分頁資訊。
+- 以系統管理員身分執行 memwarden 時，一般權限的 host 能否連上尚未實測。

@@ -174,11 +174,11 @@ scripts/register-host.ps1  註冊／解除註冊 host
   host 只負責轉送訊息，不連結 egui，維持很小的占用。
 - **Cargo workspace**：根目錄的 `Cargo.toml` 保留 `[package] memwarden`，另加 `[workspace] members = ["host"]`，
   `src/` 不搬動。
-- **共用程式碼**：`host` 套件同時是函式庫（`memwarden_host`）：訊框讀寫（`frame`）與 pipe 名稱（`pipe_name`），
-  `bridge.rs` 直接引用，避免兩端格式不一致。
+- **共用程式碼**：`host` 套件同時是函式庫（`memwarden_host`）：訊框讀寫（`frame`）、pipe 兩端與名稱（`pipe`、`pipe_name`）、
+  瀏覽器查找（`browser`）。`bridge.rs` 直接引用，避免兩端格式不一致。
 - **pipe 使用 overlapped I/O**：同步 handle 上 Windows 會把讀寫排隊，等待 memwarden 的讀取會卡住擴充功能送來的寫入。
-- **host 不解析 JSON**：host 只轉送長度前綴的訊框，唯一自己產生的訊息是連線時的 `hello`
-  （以 `format!` 組出，只含數字），因此 host 不依賴 serde。memwarden 端用 `serde_json` 解析。
+- **host 不解析 JSON**：host 只轉送長度前綴的訊框，自己產生的只有 `hello` 與 `status` 兩種固定訊息
+  （以 `format!` 組出），因此 host 不依賴 serde。memwarden 端用 `serde_json` 解析。
 
 ### 7.3 擴充功能
 
@@ -210,7 +210,8 @@ scripts/register-host.ps1  註冊／解除註冊 host
 ### 7.4 隱私界線
 
 - 分頁的 URL、標題、favicon **只留在擴充功能內**（彈出視窗顯示用），不送給 host 或 memwarden，也不寫入儲存空間。
-- 送給 memwarden 的只有數字與布林值：分頁 ID 與視窗 ID（僅用於回報結果）、各狀態的計數、閒置秒數。
+- 送給 memwarden 的只有計數：分頁總數、已丟棄數、可丟棄數，以及丟棄結果的數字。
+  擴充功能可以附帶其他數字欄位（例如門檻分鐘數），memwarden 會忽略。
 - host 與 bridge 不寫檔案、不寫記錄、不連網。
 
 ### 7.5 通訊協定（版本 1）
@@ -220,28 +221,43 @@ scripts/register-host.ps1  註冊／解除註冊 host
 
 | 方向 | 訊息 | 內容 |
 |---|---|---|
-| host → memwarden | `hello` | host 的父瀏覽器程序 PID 與啟動時間（host 沿父程序往上找到第一個已知瀏覽器；Chrome 在 Windows 可能經由 `cmd.exe` 啟動 host） |
-| 擴充功能 → memwarden | `tabs` | `total`、`discarded`、`candidates`、`audible`、門檻分鐘數、最舊候選的閒置秒數 |
+| host → memwarden | `hello` | 只有版本。必須是連線的第一則訊息，否則斷線 |
+| host → 擴充功能 | `status` | `connected`：memwarden 是否可連線，狀態改變時送出 |
+| 擴充功能 → memwarden | `tabs` | `total`、`discarded`、`candidates`（必要）；其他欄位忽略。每次收到 `status` 為 `connected:true` 時要重送 |
 | memwarden → 擴充功能 | `discard_idle` | 請求丟棄目前所有候選分頁（只由 memwarden 的使用者按鈕觸發） |
-| 擴充功能 → memwarden | `discard_result` | `requested`、`discarded`、`skipped` |
+| 擴充功能 → memwarden | `discard_result` | `discarded`（必要）；`requested`、`skipped` 可附帶，memwarden 目前不使用 |
 
 不認得的訊息類型一律忽略；版本不符則斷線，並在 memwarden 介面顯示「擴充功能版本不相容」。
+JSON 格式錯誤或必要欄位缺漏也會斷線。
+
+**瀏覽器的識別**：memwarden 以 `GetNamedPipeClientProcessId` 取得 host 的 PID，自己沿父程序往上找到第一個
+`chrome.exe`／`msedge.exe`（可經過 `cmd.exe` 等中間層；父程序啟動時間晚於子程序時視為 PID 已被重複使用而停止），
+不採信 host 或擴充功能自報的任何身分資訊。
 
 ### 7.6 host（`memwarden-host.exe`）
 
 - stdin／stdout 使用二進位模式；stdin 關閉（瀏覽器結束或擴充功能斷線）時結束。
 - 以 client 身分連線 `\\.\pipe\memwarden-<使用者 SID>`；memwarden 未執行時每 5 秒重試，
-  並送 `{"type":"status","connected":false}` 給擴充功能，讓彈出視窗顯示狀態。
+  並送 `{"v":1,"type":"status","connected":false}` 給擴充功能，讓彈出視窗顯示狀態。
+- memwarden 未執行時，擴充功能送來的訊息直接丟棄（重新連上後擴充功能會重送完整概況）。
 - 多個瀏覽器設定檔會各自啟動 host，memwarden 端同時接受多條連線。
 
 ### 7.7 memwarden 端（`bridge.rs`）
 
-- 背景執行緒建立 named pipe 伺服器：DACL 只允許目前使用者、`PIPE_REJECT_REMOTE_CLIENTS`。
-- 依 `hello` 的 PID + 啟動時間把連線對應到應用程式群組（例如 `chrome.exe`）；同一瀏覽器的多條連線加總顯示。
-- **介面**：已連線的瀏覽器在應用程式表格中顯示「分頁 N · 已丟棄 D · 可丟棄 C」，並有「丟棄閒置分頁」按鈕
-  （需確認）。完成後顯示「已丟棄 N 個分頁 · 瀏覽器私有記憶體 −X」，X 是送出前與收到結果 5 秒後
-  實際量測的群組私有記憶體差值，可能包含其他變動，介面標示為「前後差值」。
-  沒有安裝擴充功能時不顯示任何提示。
+- 背景執行緒建立 named pipe 伺服器，每條連線一個執行緒：
+  - DACL 只允許目前使用者，並加上 Medium 完整性標籤，讓以系統管理員身分執行的 memwarden 也能被一般權限的 host 連上。
+  - `PIPE_REJECT_REMOTE_CLIENTS`。
+  - 第一個 pipe 實例以 `FILE_FLAG_FIRST_PIPE_INSTANCE` 建立：名稱已被占用（另一個 memwarden 或冒名程序）時停用 bridge，
+    介面不顯示任何分頁資訊。
+- 依瀏覽器程序實例（PID + 啟動時間）分組；同一瀏覽器的多個設定檔加總顯示。
+- 丟棄請求送給該瀏覽器所有已回報概況的連線，等每條都回覆 `discard_result`（或斷線）才算完成；
+  30 秒沒回覆也視為完成，避免按鈕卡住。執行中再按不會重送。
+- 連線狀態的邏輯（`State`）不含 I/O，單元測試涵蓋解析、加總、等待全部回覆、斷線與逾時。
+- **介面**：應用程式卡片的篩選列下方，每個已連線的瀏覽器一行：「chrome.exe · 分頁 N · 已丟棄 D · 可丟棄 C」
+  與「丟棄閒置分頁」按鈕（需確認，確認文字警告未儲存的表單內容可能遺失）。完成後先顯示「量測中…」，
+  收到結果 5 秒後顯示「已丟棄 N 個分頁 · 瀏覽器私有記憶體前後差值 −X」。X 是送出前與之後量測的群組私有記憶體差值，
+  可能包含其他變動；增加時顯示 +X。沒有安裝擴充功能時不顯示任何提示。
+  （原本規劃放在表格列中，但操作欄寬度不夠，改為表格上方獨立一行。）
 - **寫入界線**：`bridge.rs` 不直接改變任何程序，只轉送使用者觸發的丟棄請求，實際丟棄由瀏覽器執行。
   HANDOFF 的寫入界線規則需補上這一條。
 
@@ -266,9 +282,10 @@ scripts/register-host.ps1  註冊／解除註冊 host
 - [x] 規格
 - [x] Cargo workspace 與 `host/` 骨架；訊框讀寫與父瀏覽器查找（10 項單元測試；
       另以暫時的 PowerShell pipe 伺服器手動驗證雙向轉送、memwarden 未執行／中途關閉時的狀態通知、stdin 關閉時結束）
-- [ ] `bridge.rs`：named pipe 伺服器、DACL、訊息解析（含單元測試）
+- [x] `bridge.rs`：named pipe 伺服器、DACL、訊息解析（5 項單元測試；host 函式庫另有 server／client 實際收發測試）
 - [ ] 擴充功能：manifest、service worker、候選判定、彈出視窗、四語系 `_locales`
-- [ ] memwarden 介面：瀏覽器列的分頁概況、丟棄按鈕與結果、四語系 `locales/*.yml`
+- [x] memwarden 介面：瀏覽器列的分頁概況、丟棄按鈕與結果、四語系 `locales/*.yml`
+      （以改名為 `chrome.exe` 的 PowerShell 扮演瀏覽器，透過 host 送出概況，截圖確認顯示；按下丟棄的流程待擴充功能完成後實機驗證）
 - [ ] `register-host.ps1`（含 `-Unregister`）
 - [ ] 實機驗證：Chrome 與 Edge、多設定檔、memwarden 未執行／中途結束、Commit 前後量測
 - [ ] 量測 host 與 memwarden 自身占用
@@ -292,6 +309,7 @@ scripts/register-host.ps1  註冊／解除註冊 host
 | 2026-10-31 | 分頁 URL／標題不離開擴充功能 | 與命令列同等敏感；memwarden 只需要計數就能呈現概況與觸發丟棄 |
 | 2026-10-31 | 丟棄分頁只由使用者觸發，預設門檻 15 分鐘 | 未儲存的表單內容可能遺失，且無法在不注入 content script 的情況下偵測 |
 | 2026-10-31 | 不做單一分頁記憶體 | 穩定版 Chrome 沒有分頁 ↔ PID 的 API；改以瀏覽器整體的前後實測差值呈現 |
+| 2026-10-31 | 瀏覽器由 memwarden 依 pipe client PID 自行判定，`hello` 只帶版本 | 不採信連線方自報的身分；host 也因此不必列舉程序 |
 
 ## 9. 非目標
 
@@ -306,3 +324,4 @@ scripts/register-host.ps1  註冊／解除註冊 host
 - M6：Chrome／Edge 在 Windows 啟動 host 的程序鏈（是否經由 `cmd.exe`）需實機確認，父瀏覽器查找要能容忍中間層。
 - M6：丟棄分頁可能讓未儲存的表單內容遺失（見 7.9），實機驗證時確認 Chrome／Edge 目前的表單還原行為，必要時調整確認文字。
 - M6：memwarden 新增 `serde_json` 相依，需量測對執行檔大小與自身記憶體的影響。
+- M6：以系統管理員身分執行 memwarden 時，一般權限的 host 能否連上（pipe 已加 Medium 完整性標籤）尚未實測。

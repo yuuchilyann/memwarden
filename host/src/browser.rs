@@ -1,6 +1,7 @@
-//! Finds the browser process that launched this host.
-//! Chrome on Windows may start the host through `cmd.exe`, so the walk
-//! skips intermediate processes instead of looking at the direct parent only.
+//! Finds the browser process that launched a host.
+//! memwarden runs this on the PID of each pipe client instead of trusting
+//! anything the client says about itself. Chrome on Windows may start the
+//! host through `cmd.exe`, so the walk skips intermediate processes.
 
 use std::collections::HashMap;
 
@@ -9,7 +10,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::Threading::{
-    GetCurrentProcessId, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 /// Browsers the extension supports (see PLAN.md 7.1).
@@ -21,10 +22,10 @@ const MAX_DEPTH: usize = 8;
 /// Process instance: PID plus start time in FILETIME ticks, as in memwarden's `process.rs`.
 pub type Instance = (u32, u64);
 
-/// The browser instance that is an ancestor of this process, if any.
-pub fn launching_browser() -> Option<Instance> {
+/// The browser instance that is an ancestor of process `pid`, if any.
+pub fn browser_ancestor(pid: u32) -> Option<Instance> {
     let procs = snapshot()?;
-    find_browser(unsafe { GetCurrentProcessId() }, &procs, created)
+    find_browser(pid, &procs, created)
 }
 
 /// Walks up from `start` to the first ancestor named like a browser.

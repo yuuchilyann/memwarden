@@ -11,9 +11,11 @@ use egui_plot::{Corner, HLine, Legend, Line, LineStyle, Plot, PlotPoints};
 use rust_i18n::t;
 
 use crate::activity::Status;
+use crate::bridge::{Bridge, BrowserTabs, Discard};
 use crate::classify::{AppUsage, Category};
 use crate::i18n::Lang;
 use crate::priority::Governor;
+use crate::process::Instance;
 use crate::trim;
 use crate::sampler::{self, Snapshot};
 use crate::theme::{
@@ -25,6 +27,9 @@ const SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 const HISTORY_LEN: usize = 300;
 const TOP_N: usize = 6;
 const PALETTE: [Color32; 4] = [BLUE, VIOLET, GREEN, AMBER];
+/// Wait after the extension reports a discard before measuring the browser
+/// again, so exiting renderer processes are gone from the sample.
+const DISCARD_SETTLE: Duration = Duration::from_secs(5);
 const LANG_KEY: &str = "lang";
 
 const MB: f64 = 1024.0 * 1024.0;
@@ -39,6 +44,8 @@ pub struct App {
     filter: Filter,
     lang: Lang,
     governor: Arc<Mutex<Governor>>,
+    /// `None` when the pipe could not be created (another memwarden is running).
+    bridge: Option<Bridge>,
     controls: Controls,
 }
 
@@ -50,12 +57,23 @@ struct Controls {
     /// Running trim, if any.
     trimming: Option<Receiver<trim::Report>>,
     last_trim: Option<trim::Report>,
+    last_discard: Option<DiscardRun>,
+}
+
+/// Latest tab discard request and its measured effect.
+struct DiscardRun {
+    browser: Instance,
+    /// Private bytes of the browser's app group when the request was sent.
+    before: u64,
+    /// `before` minus private bytes after the discard settled; negative if it grew.
+    change: Option<i64>,
 }
 
 #[derive(Clone, Copy)]
 enum Bulk {
     Lower,
     Trim,
+    Discard(Instance),
 }
 
 /// User actions, applied after the frame is drawn.
@@ -66,6 +84,7 @@ enum Action {
     RestoreAll,
     Trim(String),
     TrimLongIdle,
+    DiscardTabs(Instance),
 }
 
 fn lock(governor: &Mutex<Governor>) -> MutexGuard<'_, Governor> {
@@ -93,6 +112,11 @@ fn is_idle_candidate(app: &AppUsage) -> bool {
     app.category.idle_candidate() && matches!(app.status, Status::Idle(_))
 }
 
+/// The application group a browser process instance belongs to.
+fn app_of(apps: &[AppUsage], browser: Instance) -> Option<&AppUsage> {
+    apps.iter().find(|a| a.instances.contains(&browser))
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Priority: MEMWARDEN_LANG (for translators) > saved choice > Windows language.
@@ -113,6 +137,7 @@ impl App {
             filter: Filter::default(),
             lang,
             governor,
+            bridge: Bridge::start(cc.egui_ctx.clone()),
             controls: Controls::default(),
         }
     }
@@ -157,12 +182,37 @@ impl App {
                     let targets: Vec<_> = snap.apps.iter().filter(|a| trim::eligible(a)).cloned().collect();
                     start_trim(&mut self.controls, targets);
                 }
+                Action::DiscardTabs(browser) => {
+                    let before = app_of(&snap.apps, browser).map(|a| a.private);
+                    if let (Some(bridge), Some(before)) = (&self.bridge, before)
+                        && bridge.discard_idle(browser)
+                    {
+                        self.controls.last_discard = Some(DiscardRun { browser, before, change: None });
+                    }
+                }
             }
         }
         // Show the change now instead of waiting for the next sample.
         for app in &mut snap.apps {
             app.lowered = gov.is_lowered(&app.name);
         }
+    }
+}
+
+/// Measures the browser once the discard has settled.
+fn measure_discard(run: &mut DiscardRun, browsers: &[BrowserTabs], snap: &Snapshot) {
+    if run.change.is_some() {
+        return;
+    }
+    let done_at = browsers.iter().find(|b| b.browser == run.browser).and_then(|b| match b.discard {
+        Some(Discard::Done { at, .. }) => Some(at),
+        _ => None,
+    });
+    if let Some(at) = done_at
+        && snap.taken >= at + DISCARD_SETTLE
+        && let Some(app) = app_of(&snap.apps, run.browser)
+    {
+        run.change = Some(run.before as i64 - app.private as i64);
     }
 }
 
@@ -188,6 +238,11 @@ impl eframe::App for App {
             let gov = lock(&self.governor);
             (gov.lowered_count(), gov.failed)
         };
+        let (browsers, incompatible) =
+            self.bridge.as_ref().map_or((Vec::new(), false), |b| (b.browsers(), b.incompatible()));
+        if let (Some(run), Some(snap)) = (self.controls.last_discard.as_mut(), self.latest.as_ref()) {
+            measure_discard(run, &browsers, snap);
+        }
         let Self { latest, history, filter, started, lang, controls, .. } = self;
 
         let picked = egui::Panel::top("header")
@@ -222,7 +277,8 @@ impl eframe::App for App {
                             strip.cell(|ui| top_card(ui, &snap.apps));
                         });
                 });
-                actions = apps_card(ui, snap, filter, controls, (lowered, failed));
+                let tabs = (browsers.as_slice(), incompatible);
+                actions = apps_card(ui, snap, filter, controls, (lowered, failed), tabs);
             });
         if !actions.is_empty() {
             self.apply(actions);
@@ -273,6 +329,12 @@ fn meter(ui: &mut Ui, frac: f64, color: Color32) {
 fn fmt_bytes(bytes: u64) -> String {
     let b = bytes as f64;
     if b >= GB { format!("{:.1} GB", b / GB) } else { format!("{:.0} MB", b / MB) }
+}
+
+/// A decrease as "−X", an increase as "+X".
+fn fmt_change(decrease: i64) -> String {
+    let sign = if decrease >= 0 { '−' } else { '+' };
+    format!("{sign}{}", fmt_bytes(decrease.unsigned_abs()))
 }
 
 // ---------- sections ----------
@@ -463,13 +525,15 @@ fn status_text(app: &AppUsage) -> RichText {
     if app.lowered { RichText::new(format!("↓ {text}")).color(VIOLET) } else { RichText::new(text).color(color) }
 }
 
-/// `priority` is `(lowered app count, processes that failed in the last action)`.
+/// `priority` is `(lowered app count, processes that failed in the last action)`;
+/// `tabs` is `(browsers connected through the extension, incompatible extension seen)`.
 fn apps_card(
     ui: &mut Ui,
     snap: &Snapshot,
     filter: &mut Filter,
     controls: &mut Controls,
     priority: (usize, usize),
+    tabs: (&[BrowserTabs], bool),
 ) -> Vec<Action> {
     let mut actions = Vec::new();
     card(ui, true, |ui| {
@@ -538,6 +602,15 @@ fn apps_card(
                             ),
                             Action::TrimLongIdle,
                         ),
+                        Bulk::Discard(browser) => {
+                            let name = app_of(&snap.apps, browser).map_or("", |a| a.name.as_str());
+                            let count = tabs.0.iter().find(|b| b.browser == browser).map_or(0, |b| b.tabs.candidates);
+                            (
+                                t!("tabs.confirm_yes"),
+                                t!("tabs.confirm", name = name, count = count),
+                                Action::DiscardTabs(browser),
+                            )
+                        }
                     };
                     if ui.button(RichText::new(yes).color(AMBER)).clicked() {
                         actions.push(action);
@@ -573,6 +646,8 @@ fn apps_card(
                 }
             });
         });
+
+        tabs_rows(ui, snap, tabs, controls);
 
         let needle = filter.text.to_lowercase();
         let rows: Vec<&AppUsage> = snap.apps.iter().filter(|a| filter.matches(a, &needle)).collect();
@@ -671,3 +746,43 @@ fn apps_card(
     actions
 }
 
+/// One line per browser connected through the extension: tab counts, the
+/// discard button and the last result. Nothing is shown without the extension.
+fn tabs_rows(ui: &mut Ui, snap: &Snapshot, (browsers, incompatible): (&[BrowserTabs], bool), controls: &mut Controls) {
+    if incompatible {
+        ui.label(RichText::new(t!("tabs.incompatible")).size(12.0).color(MUTED));
+    }
+    for b in browsers {
+        let Some(app) = app_of(&snap.apps, b.browser) else { continue };
+        let t = b.tabs;
+        ui.horizontal(|ui| {
+            let summary =
+                t!("tabs.summary", name = app.name, total = t.total, discarded = t.discarded, candidates = t.candidates);
+            chip(ui, &summary, BLUE);
+            let running = b.discard == Some(Discard::Running);
+            let button = ui
+                .add_enabled(
+                    t.candidates > 0 && !running && controls.confirm.is_none(),
+                    egui::Button::new(t!("tabs.discard", count = t.candidates)).small(),
+                )
+                .on_hover_text(t!("tabs.explain"));
+            if button.clicked() {
+                controls.confirm = Some(Bulk::Discard(b.browser));
+            }
+            let run = controls.last_discard.as_ref().filter(|r| r.browser == b.browser);
+            match (b.discard, run.map(|r| r.change)) {
+                (Some(Discard::Running), _) => {
+                    ui.spinner();
+                    ui.label(RichText::new(t!("tabs.running")).size(12.0).color(MUTED));
+                }
+                (Some(Discard::Done { discarded, .. }), Some(Some(change))) => {
+                    chip(ui, &t!("tabs.result", count = discarded, change = fmt_change(change)), GREEN);
+                }
+                (Some(Discard::Done { discarded, .. }), Some(None)) => {
+                    ui.label(RichText::new(t!("tabs.measuring", count = discarded)).size(12.0).color(MUTED));
+                }
+                _ => {}
+            }
+        });
+    }
+}

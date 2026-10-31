@@ -13,6 +13,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 mod activity;
 mod app;
 mod audio;
+mod bridge;
 mod classify;
 mod i18n;
 mod priority;

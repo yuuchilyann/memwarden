@@ -5,27 +5,26 @@
 //! logs or opens network connections. Stdout carries the protocol only, so
 //! nothing else may ever be printed to it.
 
-mod browser;
-mod pipe;
-
 use std::io;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use memwarden_host::frame::{read_frame, write_frame};
+use memwarden_host::pipe::Pipe;
 use memwarden_host::{PROTOCOL_VERSION, pipe_name};
-use pipe::PipeClient;
 
 /// How often to retry while memwarden is not running.
 const RETRY: Duration = Duration::from_secs(5);
 
 /// Pipe to memwarden while connected; shared with the stdin thread.
-type Link = Arc<Mutex<Option<Arc<PipeClient>>>>;
+type Link = Arc<Mutex<Option<Arc<Pipe>>>>;
 
 fn main() {
     let Ok(name) = pipe_name() else { return };
-    let hello = hello_message(browser::launching_browser());
+    // memwarden identifies the browser from the pipe client's PID itself,
+    // so the greeting only carries the protocol version.
+    let hello = format!(r#"{{"v":{PROTOCOL_VERSION},"type":"hello"}}"#);
     let link: Link = Arc::default();
 
     // Extension → memwarden. The browser closes stdin when it disconnects us.
@@ -46,7 +45,7 @@ fn main() {
     // memwarden → extension, reconnecting whenever memwarden restarts.
     let mut announced = None;
     loop {
-        let connected = PipeClient::connect(&name).map(Arc::new);
+        let connected = Pipe::connect(&name).map(Arc::new);
         if let Ok(pipe) = &connected
             && write_frame(&mut &**pipe, hello.as_bytes()).is_ok()
         {
@@ -61,7 +60,7 @@ fn main() {
 }
 
 /// Copies memwarden's messages to the extension until the pipe closes.
-fn relay_to_stdout(pipe: &PipeClient) {
+fn relay_to_stdout(pipe: &Pipe) {
     let mut reader = pipe;
     while let Ok(Some(msg)) = read_frame(&mut reader) {
         if write_frame(&mut io::stdout().lock(), &msg).is_err() {
@@ -80,29 +79,5 @@ fn announce(last: &mut Option<bool>, connected: bool) {
     let msg = format!(r#"{{"v":{PROTOCOL_VERSION},"type":"status","connected":{connected}}}"#);
     if write_frame(&mut io::stdout().lock(), msg.as_bytes()).is_err() {
         std::process::exit(0);
-    }
-}
-
-/// First message on every pipe connection. Numbers only; `null` when the
-/// launching browser could not be identified.
-fn hello_message(browser: Option<browser::Instance>) -> String {
-    let (pid, created) = match browser {
-        Some((pid, created)) => (pid.to_string(), created.to_string()),
-        None => ("null".into(), "null".into()),
-    };
-    format!(r#"{{"v":{PROTOCOL_VERSION},"type":"hello","browser_pid":{pid},"browser_created":{created}}}"#)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hello_message_shapes() {
-        assert_eq!(
-            hello_message(Some((1234, 5678))),
-            r#"{"v":1,"type":"hello","browser_pid":1234,"browser_created":5678}"#
-        );
-        assert_eq!(hello_message(None), r#"{"v":1,"type":"hello","browser_pid":null,"browser_created":null}"#);
     }
 }

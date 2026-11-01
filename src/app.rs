@@ -745,7 +745,8 @@ fn apps_card(
                     "growth.summary_help",
                     min = growth::MIN_OBSERVED_MINUTES,
                     mb = growth::MIN_INCREASE / (1024 * 1024),
-                    ratio = growth::MIN_RATIO
+                    ratio = growth::MIN_RATIO,
+                    rise = growth::MIN_RISE / (1024 * 1024)
                 );
                 let summary = t!("growth.summary", count = growth_count, size = fmt_bytes(growth_bytes));
                 chip(ui, &summary, ORANGE).on_hover_text(help);

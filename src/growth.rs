@@ -15,8 +15,13 @@ use crate::process::Instance;
 
 /// How long floors are kept, in minutes.
 const KEEP_MINUTES: u32 = 6 * 60;
-/// Observation time, in minutes, before growth is reported.
-pub const MIN_OBSERVED_MINUTES: u32 = 60;
+/// Still growing means the floor rose in each of the last `RISE_HOURS` spans of this many minutes.
+const RISE_MINUTES: u32 = 60;
+const RISE_HOURS: u32 = 2;
+/// Minimum rise of the floor in each of those spans.
+pub const MIN_RISE: u64 = 20 * 1024 * 1024;
+/// Observation time, in minutes, before growth is reported: enough to check every rise span.
+pub const MIN_OBSERVED_MINUTES: u32 = RISE_MINUTES * RISE_HOURS;
 /// The current floor is the lowest value of this many recent minutes.
 const RECENT_MINUTES: u32 = 10;
 /// Minimum increase of the floor worth reporting.
@@ -81,17 +86,27 @@ impl History {
 
     /// The growth if every condition holds. Only floors before the recent
     /// minutes count as the low point, so the lowest floor always comes
-    /// before the growth and an app still loading does not count.
+    /// before the growth and an app still loading does not count. The floor
+    /// must also still be rising hour by hour: a single jump that then levels
+    /// off (a sync client filling its cache) is not ongoing growth.
     fn growth(&self) -> Option<Growth> {
         let now = self.minute.0;
         if now < MIN_OBSERVED_MINUTES {
             return None;
         }
-        let recent = |i: u32| i + RECENT_MINUTES > now;
         let all = || self.floors.iter().copied().chain([self.minute]);
-        let current = all().filter(|&(i, _)| recent(i)).map(|(_, b)| b).min()?;
-        let low = all().filter(|&(i, _)| !recent(i)).map(|(_, b)| b).min()?;
-        let grown = current.saturating_sub(low) >= MIN_INCREASE && current as f64 >= low as f64 * MIN_RATIO;
+        // Lowest value of the recent minutes ending at minute `end`.
+        let floor_at = |end: u32| all().filter(|&(i, _)| i <= end && i + RECENT_MINUTES > end).map(|(_, b)| b).min();
+        let current = floor_at(now)?;
+        let low = all().filter(|&(i, _)| i + RECENT_MINUTES <= now).map(|(_, b)| b).min()?;
+        let mut rising = true;
+        let mut later = current;
+        for h in 1..=RISE_HOURS {
+            let earlier = floor_at(now - h * RISE_MINUTES)?;
+            rising &= later >= earlier.saturating_add(MIN_RISE);
+            later = earlier;
+        }
+        let grown = rising && current.saturating_sub(low) >= MIN_INCREASE && current as f64 >= low as f64 * MIN_RATIO;
         grown.then(|| {
             let first = self.floors.front().map_or(now, |&(i, _)| i);
             Growth { span: Duration::from_secs(u64::from(now - first) * 60), low, current, floors: all().collect() }
@@ -165,9 +180,12 @@ mod tests {
         apps.into_iter().next().unwrap()
     }
 
-    /// 400 MB for the first hour, then 1.4 GB.
+    /// Long enough to check every rise span.
+    const RUN: u32 = 150;
+
+    /// 400 MB, growing 8 MB a minute.
     fn leak(m: u32) -> u64 {
-        if m < 60 { 400 * MB } else { 1_400 * MB }
+        400 * MB + u64::from(m) * 8 * MB
     }
 
     #[test]
@@ -195,21 +213,46 @@ mod tests {
     #[test]
     fn steady_growth_is_reported() {
         let mut t = Tracker::default();
-        let a = run(&mut t, Instant::now(), 75, Category::WebApp, leak);
-        let g = a.growth.as_ref().expect("grew by 1 GB");
-        assert_eq!((g.low, g.current, g.increase()), (400 * MB, 1_400 * MB, 1_000 * MB));
-        assert_eq!(g.span, MINUTE * 74);
-        assert_eq!(g.floors.len(), 75);
+        let a = run(&mut t, Instant::now(), RUN, Category::WebApp, leak);
+        let g = a.growth.as_ref().expect("grew by 1.1 GB");
+        // The current floor is minute 140, the lowest of the last ten.
+        assert_eq!((g.low, g.current, g.increase()), (400 * MB, 1_520 * MB, 1_120 * MB));
+        assert_eq!(g.span, MINUTE * (RUN - 1));
+        assert_eq!(g.floors.len() as u32, RUN);
         assert!(suggested(&a));
     }
 
     #[test]
-    fn needs_an_hour_of_observation() {
+    fn needs_two_hours_of_observation() {
         let mut t = Tracker::default();
-        let a = run(&mut t, Instant::now(), MIN_OBSERVED_MINUTES, Category::Application, |m| {
-            if m < 30 { 400 * MB } else { 1_400 * MB }
-        });
+        let start = Instant::now();
+        let mut a = run(&mut t, start, MIN_OBSERVED_MINUTES, Category::Application, leak);
         assert!(a.growth.is_none());
+        a.private = leak(MIN_OBSERVED_MINUTES);
+        t.update(std::slice::from_mut(&mut a), start + MINUTE * MIN_OBSERVED_MINUTES);
+        assert!(a.growth.is_some(), "reported once observed long enough");
+    }
+
+    #[test]
+    fn a_single_jump_is_not_growth() {
+        // Like a sync client: 400 MB, then 1.4 GB from minute 30 on, never reported.
+        let mut t = Tracker::default();
+        let start = Instant::now();
+        let mut apps = [app(Category::Application, 0, &[(1, 1)])];
+        for half in 0..400 {
+            apps[0].private = if half < 60 { 400 * MB } else { 1_400 * MB };
+            t.update(&mut apps, start + MINUTE / 2 * half);
+            assert!(apps[0].growth.is_none(), "reported at minute {}", half / 2);
+        }
+    }
+
+    #[test]
+    fn levelling_off_clears_the_flag() {
+        let mut t = Tracker::default();
+        let level = |m: u32| leak(m.min(RUN));
+        assert!(run(&mut t, Instant::now(), RUN, Category::Application, level).growth.is_some());
+        let mut t = Tracker::default();
+        assert!(run(&mut t, Instant::now(), RUN + 70, Category::Application, level).growth.is_none());
     }
 
     #[test]
@@ -228,17 +271,19 @@ mod tests {
     #[test]
     fn small_or_proportionally_small_growth_is_not_reported() {
         let mut t = Tracker::default();
-        let small = run(&mut t, Instant::now(), 75, Category::Application, |m| if m < 60 { 100 * MB } else { 590 * MB });
+        // Both still rise every hour: 100 MB + 3 MB a minute ends 420 MB up.
+        let small = run(&mut t, Instant::now(), RUN, Category::Application, |m| 100 * MB + u64::from(m) * 3 * MB);
         assert!(small.growth.is_none(), "below MIN_INCREASE");
         let mut t = Tracker::default();
-        let big = run(&mut t, Instant::now(), 75, Category::Application, |m| if m < 60 { 2_000 * MB } else { 2_900 * MB });
+        // 2 GB + 6 MB a minute ends 840 MB up, only 1.42 times.
+        let big = run(&mut t, Instant::now(), RUN, Category::Application, |m| 2_000 * MB + u64::from(m) * 6 * MB);
         assert!(big.growth.is_none(), "below MIN_RATIO");
     }
 
     #[test]
     fn shrinking_back_clears_the_flag() {
         let mut t = Tracker::default();
-        let a = run(&mut t, Instant::now(), 90, Category::Application, |m| if m < 75 { leak(m) } else { 400 * MB });
+        let a = run(&mut t, Instant::now(), RUN + 15, Category::Application, |m| if m < RUN { leak(m) } else { 400 * MB });
         assert!(a.growth.is_none(), "the recent floor is back at the start");
     }
 
@@ -246,7 +291,7 @@ mod tests {
     fn only_apps_and_web_apps_are_tracked() {
         for category in [Category::Browser, Category::System, Category::Security, Category::VirtualMachine, Category::Service] {
             let mut t = Tracker::default();
-            assert!(run(&mut t, Instant::now(), 75, category, leak).growth.is_none(), "{category:?}");
+            assert!(run(&mut t, Instant::now(), RUN, category, leak).growth.is_none(), "{category:?}");
             assert!(t.apps.is_empty());
         }
     }
@@ -255,23 +300,23 @@ mod tests {
     fn restart_clears_the_history() {
         let mut t = Tracker::default();
         let start = Instant::now();
-        let mut a = run(&mut t, start, 75, Category::Application, leak);
+        let mut a = run(&mut t, start, RUN, Category::Application, leak);
         assert!(a.growth.is_some());
         // Same name, but none of the old process instances.
         a.instances = vec![(1, 2), (5, 3)];
-        t.update(std::slice::from_mut(&mut a), start + MINUTE * 76);
+        t.update(std::slice::from_mut(&mut a), start + MINUTE * (RUN + 1));
         assert!(a.growth.is_none());
         assert!(t.apps["app.exe"].floors.is_empty());
         // A new helper process alongside an old one is not a restart.
         a.instances = vec![(1, 2), (6, 4)];
-        t.update(std::slice::from_mut(&mut a), start + MINUTE * 78);
+        t.update(std::slice::from_mut(&mut a), start + MINUTE * (RUN + 3));
         assert_eq!(t.apps["app.exe"].floors.len(), 1);
     }
 
     #[test]
     fn memwarden_itself_is_shown_but_not_suggested() {
         let mut t = Tracker::default();
-        let mut a = run(&mut t, Instant::now(), 75, Category::Application, leak);
+        let mut a = run(&mut t, Instant::now(), RUN, Category::Application, leak);
         a.instances.push((std::process::id(), 0));
         assert!(a.growth.is_some());
         assert!(!suggested(&a));

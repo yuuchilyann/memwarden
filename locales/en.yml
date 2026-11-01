@@ -114,7 +114,7 @@ close.not_responding: "The app is not responding; try again later."
 close.denied: "The app runs with higher privileges, so memwarden cannot close it."
 
 growth.summary: "Keeps growing: %{count} · reopening frees about %{size}"
-growth.summary_help: "Apps observed for at least %{min} minutes whose lowest private memory per minute rose by at least %{mb} MB and to at least %{ratio} times its earlier level (browsers excluded). This may be a memory leak or a cache that never shrinks; closing and reopening the app usually frees most of the increase and lowers commit charge. History builds up only while memwarden is open and covers up to 6 hours."
+growth.summary_help: "Apps observed for at least %{min} minutes whose lowest private memory per minute rose by at least %{mb} MB and to at least %{ratio} times its earlier level, and still rose by at least %{rise} MB in each of the last two hours (browsers excluded; a single jump that then levels off does not count). This may be a memory leak or a cache that never shrinks; closing and reopening the app usually frees most of the increase and lowers commit charge. History builds up only while memwarden is open and covers up to 6 hours."
 growth.status: "Growing +%{size}"
 growth.status_help: "Rose from %{low} to %{current} over the past %{h} h %{m} min (lowest value per minute). Reopening the app usually frees most of the increase."
 growth.confirm: "Close %{name}? Same as clicking the window's X; the app asks about unsaved work itself. memwarden does not reopen it; start it again yourself when you need it."

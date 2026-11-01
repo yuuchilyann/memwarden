@@ -1,18 +1,20 @@
 # memwarden 接手文件
 
-最後更新：2026-10-31 · 版本 0.1.0
+最後更新：2026-11-01 · 版本 0.1.0
 
 開發進度與下一步請見 [PLAN.md](PLAN.md)。
 
-**目前狀態（2026-10-31）**：M0–M5 完成；M6（瀏覽器擴充功能）、M7（關閉建議、分頁檔資訊）與
-M8（記憶體成長追蹤）程式完成，部分實機驗證待做（PLAN.md 7.10、8.9、9.8；M8 需要開著數小時觀察並調整門檻）。
+**目前狀態（2026-11-01）**：M0–M5 完成；M6（瀏覽器擴充功能）、M7（關閉建議、分頁檔資訊）與
+M8（記憶體成長追蹤）程式完成，部分實機驗證待做（PLAN.md 7.10、8.9、9.8）。
+M8 第一次實機觀察（14 小時，夜間為主）已完成，依結果加入「仍在上升」條件（PLAN.md 9.3、9.8）。
 **目前進行 M9 發佈**（PLAN.md 第 10 節）：CI、圖示、打包、README 已完成，
 repo 已公開於 https://github.com/yuuchilyann/memwarden ，CI 通過。
 
 **下一步**（依序）：
 
-1. M8 實機觀察：擁有者離開辦公室時開著發佈版收集資料（做法見第 7 節第 7 項），回來後依結果調整 `growth.rs` 門檻，
-   同時記錄發佈版自身占用（介紹網頁前要處理）。
+1. M8 白天實機觀察：實際使用電腦的一天開著發佈版與外部記錄器（做法見第 7 節第 7 項），
+   看真正持續成長的程式與門檻數值；同時確認 memwarden 自身占用（第一次觀察 108 → 151 MB，
+   其中一次 +29 MB 原因未明，之後每小時約 +0.2–0.45 MB；介紹網頁前要處理）。
 2. 第一次 Release（做法見 3.1）：推送 `v0.1.0` 標籤，檢查草稿後由擁有者發佈。
 3. 其餘實機驗證：M6 Edge／多設定檔／memwarden 中途關閉（PLAN.md 7.10），
    M7 有視窗程式的關閉結果、記事本未存檔、以系統管理員執行的程式（PLAN.md 8.9）。
@@ -136,6 +138,8 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `scripts/capture-window.ps1` | 擷取 memwarden 視窗截圖（驗證 UI 用） |
 | `scripts/package.ps1` | 建置發佈版並打包 zip（CI 的 release workflow 也用它）；標籤版本須等於 `Cargo.toml` |
 | `scripts/make-icon.py` | 繪製圖示（Python + Pillow），只在修改圖示時執行，產物已提交 |
+| `scripts/growth-logger.ps1` | M8 觀察用：每 15 秒讀 `Win32_Process`（不讀命令列），每分鐘把各程式私有記憶體最低值寫入 `reports\growth-log.csv` |
+| `scripts/replay-growth.py` | 以 `growth.rs` 的規則重播上面的記錄，比較多組門檻（只用 Python 標準函式庫；常數與排除清單需和 `growth.rs`、`classify.rs` 同步） |
 | `assets/` | `memwarden.ico`（執行檔）、`icon-256.png`（視窗） |
 | `build.rs` | 把圖示與版本資訊嵌入 memwarden.exe（`embed-resource`） |
 | `.github/workflows/` | `ci.yml`：build、clippy（`-D warnings`）、test、擴充功能測試；`release.yml`：推送 `v*` 標籤時建立草稿 Release |
@@ -188,7 +192,7 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 
 ## 7. 驗證方式
 
-1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告（目前 memwarden 45 項 + host 10 項），
+1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告（目前 memwarden 47 項 + host 10 項），
    `cargo clippy --all-targets -- -D warnings` 也要通過（CI 會檢查）。
    CI 上略過需要互動式桌面的 `closes_a_real_window`，所以 `close.rs` 的視窗測試只在本機執行。
    純邏輯：`classify.rs` 分類與 WebView2 歸屬、`activity.rs` 狀態轉換、`bridge.rs` 訊息處理、
@@ -202,7 +206,7 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
    ```
    這個腳本用 `PrintWindow` 只擷取 memwarden 視窗，不會截到其他視窗。
    閒置狀態需要 `-WaitSeconds 370`（5 分鐘以上）；修剪按鈕需要 `-WaitSeconds 970`（15 分鐘以上）；
-   關閉建議需要 30 分鐘以上；持續成長需要 60 分鐘以上，且要有程式的底線成長 500 MB 以上。
+   關閉建議需要 30 分鐘以上；持續成長需要 120 分鐘以上，且要有程式的底線成長 500 MB 以上、最近兩小時仍在上升。
    已經有另一個 memwarden 在執行時，新開的視窗不會顯示（截圖只有 16×16），先關掉原本的再截圖。
    懸停說明（tooltip）無法用這個腳本驗證，需要在實際視窗上用滑鼠確認。
 3. 音訊偵測可對真實系統執行診斷：`cargo test audio -- --ignored --nocapture`（印出正在播放／錄音的 PID）。
@@ -216,7 +220,15 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 7. M8 實機觀察：把 `dist\memwarden-<版本>-windows-x64.zip` 解壓縮到 repo 以外的資料夾，從檔案總管或一般終端機
    啟動（不要從 Claude desktop app 啟動，視窗不會顯示；也不要直接執行 `target\release` 的檔案，開著時會鎖住、
    之後無法重新建置）。開著數小時，記錄被標示「持續成長」的程式、懸停說明的數字與折線，以及 memwarden 自身占用。
-   目前介面只顯示已達門檻的程式，看不到差一點達標的程式。
+   介面只顯示已達門檻的程式，所以同時在背景執行外部記錄器，結束後重播：
+   ```powershell
+   Start-Process pwsh -ArgumentList '-NoProfile', '-File', 'scripts\growth-logger.ps1' -WindowStyle Hidden -PassThru
+   # 結束時 Stop-Process -Id <上面的 PID>，再：
+   python -I scripts\replay-growth.py reports\growth-log.csv
+   ```
+   記錄器本身約 50 MB、每次取樣約 0.5 秒的 WMI 工作；在 memwarden 中顯示為 `pwsh.exe`。
+   結束前可用 `PrintWindow` 擷取正在執行的 memwarden 視窗（`capture-window.ps1` 的作法，對既有 PID 的 `MainWindowHandle`），
+   截圖放 `screenshots\`。
 
 ## 8. 已知問題與限制
 

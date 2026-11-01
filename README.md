@@ -41,8 +41,8 @@ call it "freed". memwarden separates the two numbers that matter:
   X, confirmed one app at a time.
 - **Memory growth tracking**: apps whose lowest private memory per minute keeps
   rising over hours (leaks, caches that never shrink), with how much
-  reopening them would give back. memwarden needs to stay open for at least an
-  hour to see this.
+  reopening them would give back. memwarden needs to stay open for at least
+  two hours to see this.
 - **Page file info**: whether Windows can grow the page file, and how far the
   commit limit can go. A button opens the Windows settings to change it.
 - UI languages: 繁體中文, English, 日本語, 한국어.

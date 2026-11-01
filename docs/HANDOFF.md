@@ -13,7 +13,7 @@ repo 已公開於 https://github.com/yuuchilyann/memwarden ，CI 通過。
 **下一步**（依序）：
 
 1. memwarden 自身占用（介紹網頁前要處理，目標 160 MB，目前穩定在約 182 MB）：白天的持續增加已查明是外部
-   UI Automation 讀取（第 8 節），剩下螢幕鎖定時一次性約 +30 MB 待確認（PLAN.md 9.8）。
+   UI Automation 讀取（第 8 節）。螢幕鎖定時一次性約 +30 MB 疑為驅動程式造成，延後到發佈前量測時再檢查（PLAN.md 第 13 節）。
    M8 已完成夜間與白天兩次觀察，門檻數值不需調整。
 2. 第一次 Release（做法見 3.1）：推送 `v0.1.0` 標籤，檢查草稿後由擁有者發佈。
 3. 其餘實機驗證：M6 Edge／多設定檔／memwarden 中途關閉（PLAN.md 7.10），
@@ -240,7 +240,7 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 - 有程式透過 UI Automation 讀取 memwarden 的介面時（eframe 的 `accesskit`；例如輔助工具、會讀取其他視窗的 AI
   或翻譯工具），memwarden 的私有記憶體會隨讀取次數增加（實測每 2 秒讀一次約 +3 MB／分），對方結束或釋放後歸還。
   量測自身占用時要確認沒有這類程式（`Get-Process -Id <pid> -Module` 出現 `uiautomationcore.dll` 表示曾被讀取）。
-- 螢幕鎖定或顯示變化時，自身占用可能一次增加約 30 MB 且不歸還（疑為 OpenGL 驅動程式），待確認（PLAN.md 9.8）。
+- 螢幕鎖定或顯示變化時，自身占用可能一次增加約 30 MB 且不歸還（疑為 OpenGL 驅動程式），延後檢查（PLAN.md 第 13 節）。
 - CJK 字型占自身記憶體約 30–60 MB（正黑體約 20 MB、Malgun Gothic 約 13 MB）。
 - 日文模式為了基線一致，Latin 文字也用 Yu Gothic 繪製。
 - 歷史圖例的排序由 egui_plot 依名稱決定，各語言順序不同。

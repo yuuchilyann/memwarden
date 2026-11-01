@@ -15,7 +15,8 @@ repo 已公開於 https://github.com/yuuchilyann/memwarden ，CI 通過。
 1. memwarden 自身占用（介紹網頁前要處理，目標 160 MB，目前穩定在約 182 MB）：白天的持續增加已查明是外部
    UI Automation 讀取（第 8 節）。螢幕鎖定時一次性約 +30 MB 疑為驅動程式造成，延後到發佈前量測時再檢查（PLAN.md 第 13 節）。
    M8 已完成夜間與白天兩次觀察，門檻數值不需調整。
-2. 第一次 Release（做法見 3.1）：推送 `v0.1.0` 標籤，檢查草稿後由擁有者發佈。
+2. 第一次 Release（做法見 3.1）：`v0.1.0` 標籤已推送，CI 已建立草稿並檢查過檔案（PLAN.md 10.5），
+   等擁有者在 GitHub 發佈。
 3. 其餘實機驗證：M6 Edge／多設定檔／memwarden 中途關閉（PLAN.md 7.10），
    M7 有視窗程式的關閉結果、記事本未存檔、以系統管理員執行的程式（PLAN.md 8.9）。
 
@@ -70,6 +71,9 @@ $env:MEMWARDEN_LANG = "ja"; cargo run   # 強制指定語言（zh-TW / en / ja /
 2. 本機先跑 `.\scripts\package.ps1` 確認 zip 內容。
 3. `git tag v<版本>`、`git push origin v<版本>`：`release.yml` 建置、打包並建立**草稿** Release。
 4. 由擁有者在 GitHub 檢查草稿（檔案、說明）後按發佈。發佈是對外動作，不要自行發佈。
+
+發佈檔一律由 CI 建置，不要上傳本機建置的執行檔：Rust 會把相依套件原始碼的絕對路徑寫進執行檔，
+本機建置會帶出開發者的使用者路徑（`C:\Users\<名稱>\.cargo\...`）。
 
 瀏覽器擴充功能（M6）的安裝：
 

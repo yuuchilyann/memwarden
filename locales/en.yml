@@ -23,11 +23,16 @@ kpi.kernel.help: "Memory used by the Windows kernel and drivers. The paged pool 
 alert.commit: "Commit charge is at %{pct}% of the limit. At 100% applications can fail to allocate memory and crash. Close unused applications or enlarge the page file."
 alert.commit_auto: "Commit charge is at %{pct}% of its current limit. Windows manages the page file and will grow it (up to a limit of about %{limit}), but programs may still fail to allocate memory while it grows. Closing apps you do not need lowers commit the most."
 
-history.title: "Usage history · last 10 minutes"
+history.title: "Usage history"
 history.physical: "Physical"
 history.commit: "Commit"
 history.critical: "Critical"
 history.minutes: "%{n} min"
+history.hours: "%{n} h"
+history.range_10m: "10 min"
+history.range_1h: "1 h"
+history.range_6h: "6 h"
+history.peak_help: "The 1 h and 6 h views plot each minute's peak. History builds up only while memwarden is open, so right after start only the right edge of the longer views has data."
 
 top.title: "Top consumers · private bytes"
 

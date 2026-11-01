@@ -23,11 +23,16 @@ kpi.kernel.help: "Windows 커널과 드라이버가 사용하는 메모리입니
 alert.commit: "커밋 차지가 한도의 %{pct}%에 도달했습니다. 100%가 되면 앱이 메모리를 할당하지 못해 비정상 종료될 수 있습니다. 사용하지 않는 앱을 닫거나 페이지 파일을 늘리세요."
 alert.commit_auto: "커밋 차지가 현재 한도의 %{pct}%에 도달했습니다. 페이지 파일은 Windows가 관리하며 자동으로 늘어나지만(한도 최대 약 %{limit}), 늘어나는 순간 메모리를 할당하지 못하는 프로그램이 생길 수 있습니다. 쓰지 않는 앱을 닫는 것이 커밋을 가장 많이 줄입니다."
 
-history.title: "사용량 추이 · 최근 10분"
+history.title: "사용량 추이"
 history.physical: "물리 메모리"
 history.commit: "커밋"
 history.critical: "경고선"
 history.minutes: "%{n}분"
+history.hours: "%{n}시간"
+history.range_10m: "10분"
+history.range_1h: "1시간"
+history.range_6h: "6시간"
+history.peak_help: "1시간과 6시간 보기는 분당 최대값을 그립니다. 기록은 memwarden이 열려 있는 동안만 쌓이므로, 시작 직후에는 긴 범위의 오른쪽 끝에만 데이터가 있습니다."
 
 top.title: "사용량 순위 · 전용 메모리"
 

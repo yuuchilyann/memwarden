@@ -17,6 +17,7 @@ mod bridge;
 mod classify;
 mod close;
 mod growth;
+mod history;
 mod i18n;
 mod integration;
 mod priority;

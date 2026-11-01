@@ -21,8 +21,9 @@ call it "freed". memwarden separates the two numbers that matter:
 ## Features
 
 - Live dashboard, refreshed every 2 seconds: physical memory, commit charge,
-  cache and kernel pools, a 10-minute history, and per-application memory
-  grouped by executable (multi-process apps such as Chrome or Electron show as
+  cache and kernel pools, a history chart (the last 10 minutes, or each
+  minute's peak over 1 or 6 hours), and per-application memory grouped by
+  executable (multi-process apps such as Chrome or Electron show as
   one line; WebView2 helpers are counted under the app that hosts them).
 - **Idle detection**: apps unused for 5 minutes, classified as browsers,
   web-based apps, services, VMs, system or security software. Apps playing or

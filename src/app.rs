@@ -1,6 +1,6 @@
 //! Dashboard UI.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -15,6 +15,7 @@ use crate::bridge::{Bridge, BrowserTabs, Discard};
 use crate::classify::{AppUsage, Category};
 use crate::close::{self, Closing, Outcome, Refusal};
 use crate::growth::{self, Growth};
+use crate::history::{History, Range};
 use crate::i18n::Lang;
 use crate::integration::{self, Integration};
 use crate::pagefile;
@@ -27,14 +28,13 @@ use crate::theme::{
 };
 
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
-/// 10 minutes of history at the sample interval.
-const HISTORY_LEN: usize = 300;
 const TOP_N: usize = 6;
 const PALETTE: [Color32; 4] = [BLUE, VIOLET, GREEN, AMBER];
 /// Wait after the extension reports a discard before measuring the browser
 /// again, so exiting renderer processes are gone from the sample.
 const DISCARD_SETTLE: Duration = Duration::from_secs(5);
 const LANG_KEY: &str = "lang";
+const RANGE_KEY: &str = "history_range";
 
 const MB: f64 = 1024.0 * 1024.0;
 const GB: f64 = MB * 1024.0;
@@ -43,8 +43,8 @@ pub struct App {
     rx: Receiver<Snapshot>,
     latest: Option<Snapshot>,
     started: Instant,
-    /// `[seconds since start, physical %, commit %]`
-    history: VecDeque<[f64; 3]>,
+    history: History,
+    range: Range,
     filter: Filter,
     lang: Lang,
     governor: Arc<Mutex<Governor>>,
@@ -171,7 +171,12 @@ impl App {
             rx: sampler::spawn(cc.egui_ctx.clone(), SAMPLE_INTERVAL, governor.clone()),
             latest: None,
             started: Instant::now(),
-            history: VecDeque::with_capacity(HISTORY_LEN + 1),
+            history: History::default(),
+            range: cc
+                .storage
+                .and_then(|s| s.get_string(RANGE_KEY))
+                .and_then(|code| Range::from_code(&code))
+                .unwrap_or_default(),
             filter: Filter::default(),
             lang,
             governor,
@@ -190,10 +195,7 @@ impl App {
         while let Ok(snap) = self.rx.try_recv() {
             new = true;
             let t = snap.taken.duration_since(self.started).as_secs_f64();
-            self.history.push_back([t, snap.sys.phys_pct(), snap.sys.commit_pct()]);
-            if self.history.len() > HISTORY_LEN {
-                self.history.pop_front();
-            }
+            self.history.push(t, snap.sys.phys_pct(), snap.sys.commit_pct());
             self.latest = Some(snap);
         }
         new
@@ -331,7 +333,7 @@ impl eframe::App for App {
         if let (Some(run), Some(snap)) = (self.controls.last_discard.as_mut(), self.latest.as_ref()) {
             measure_discard(run, &browsers, snap);
         }
-        let Self { latest, history, filter, started, lang, controls, browser_switch, .. } = self;
+        let Self { latest, history, range, filter, started, lang, controls, browser_switch, .. } = self;
 
         let picked = egui::Panel::top("header")
             .frame(Frame::new().fill(theme::BG).inner_margin(Margin::symmetric(20, 14)))
@@ -361,7 +363,7 @@ impl eframe::App for App {
                         .size(Size::relative(0.62))
                         .size(Size::remainder())
                         .horizontal(|mut strip| {
-                            strip.cell(|ui| history_card(ui, history, started.elapsed().as_secs_f64()));
+                            strip.cell(|ui| history_card(ui, history, range, started.elapsed().as_secs_f64()));
                             strip.cell(|ui| top_card(ui, &snap.apps));
                         });
                 });
@@ -379,6 +381,7 @@ impl eframe::App for App {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(LANG_KEY, self.lang.code().to_owned());
+        storage.set_string(RANGE_KEY, self.range.code().to_owned());
     }
 }
 
@@ -593,17 +596,32 @@ fn commit_alert(ui: &mut Ui, snap: &Snapshot) {
         });
 }
 
-fn history_card(ui: &mut Ui, history: &VecDeque<[f64; 3]>, now: f64) {
+fn history_card(ui: &mut Ui, history: &History, range: &mut Range, now: f64) {
     card(ui, true, |ui| {
-        card_title(ui, &t!("history.title"));
-        // x axis: minutes relative to now (negative = past)
-        let series = |idx: usize| -> PlotPoints {
-            history.iter().map(|h| [(h[0] - now) / 60.0, h[idx]]).collect()
-        };
+        ui.horizontal(|ui| {
+            card_title(ui, &t!("history.title"));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                for r in Range::ALL.into_iter().rev() {
+                    let label = t!(match r {
+                        Range::Minutes10 => "history.range_10m",
+                        Range::Hour1 => "history.range_1h",
+                        Range::Hours6 => "history.range_6h",
+                    });
+                    let button = ui.selectable_value(range, r, label);
+                    if r != Range::Minutes10 {
+                        button.on_hover_text(t!("history.peak_help"));
+                    }
+                }
+            });
+        });
+        // x axis relative to now (negative = past), in hours for the longest range.
+        let (unit, unit_key) = if *range == Range::Hours6 { (3_600.0, "history.hours") } else { (60.0, "history.minutes") };
+        let points = history.points(*range, now);
+        let series = |idx: usize| -> PlotPoints { points.iter().map(|p| [(p[0] - now) / unit, p[idx]]).collect() };
         Plot::new("history")
             .legend(Legend::default().position(Corner::LeftTop))
             .show_grid([false, true])
-            .include_x(-(HISTORY_LEN as f64 * SAMPLE_INTERVAL.as_secs_f64()) / 60.0)
+            .include_x(-range.seconds() / unit)
             .include_x(0.0)
             .include_y(0.0)
             .include_y(100.0)
@@ -611,8 +629,15 @@ fn history_card(ui: &mut Ui, history: &VecDeque<[f64; 3]>, now: f64) {
             .allow_zoom(false)
             .allow_scroll(false)
             .allow_boxed_zoom(false)
+            .allow_axis_zoom_drag(false)
             .show_background(false)
-            .x_axis_formatter(|mark, _| t!("history.minutes", n = format!("{:.0}", mark.value)).into_owned())
+            .x_axis_formatter(move |mark, _| {
+                // Whole units only, so finer grid marks never repeat a label.
+                if mark.value.fract().abs() > 1e-6 {
+                    return String::new();
+                }
+                t!(unit_key, n = format!("{:.0}", mark.value)).into_owned()
+            })
             .y_axis_formatter(|mark, _| format!("{:.0}%", mark.value))
             .show(ui, |plot| {
                 plot.line(Line::new(t!("history.physical"), series(1)).color(BLUE).width(2.0).fill(0.0));

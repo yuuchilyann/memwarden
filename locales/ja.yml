@@ -23,11 +23,16 @@ kpi.kernel.help: "Windows カーネルとドライバーが使うメモリです
 alert.commit: "コミットチャージが上限の %{pct}% に達しています。100% になるとアプリがクラッシュする恐れがあります。不要なアプリを閉じるか、ページファイルを拡張してください。"
 alert.commit_auto: "コミットチャージが現在の上限の %{pct}% に達しています。ページファイルは Windows が管理しており自動的に拡張されます（上限は最大約 %{limit}）が、拡張の瞬間にメモリを確保できないプログラムが出ることがあります。使わないアプリを閉じるのがコミットを下げる最も効果的な方法です。"
 
-history.title: "使用率の推移 · 直近 10 分"
+history.title: "使用率の推移"
 history.physical: "物理メモリ"
 history.commit: "コミット"
 history.critical: "警告ライン"
 history.minutes: "%{n} 分"
+history.hours: "%{n} 時間"
+history.range_10m: "10 分"
+history.range_1h: "1 時間"
+history.range_6h: "6 時間"
+history.peak_help: "1 時間と 6 時間の表示は 1 分ごとの最大値を描画します。履歴は memwarden を開いている間だけ記録されるため、起動直後は長い範囲の右端にしかデータがありません。"
 
 top.title: "使用量ランキング · プライベート"
 

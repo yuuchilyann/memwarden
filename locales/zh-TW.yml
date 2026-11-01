@@ -23,11 +23,16 @@ kpi.kernel.help: "Windows 核心與驅動程式使用的記憶體。分頁集區
 alert.commit: "認可記憶體已達上限的 %{pct}%。到達 100% 時，應用程式可能無法配置記憶體而當機。請關閉不使用的應用程式，或加大分頁檔。"
 alert.commit_auto: "認可記憶體已達目前上限的 %{pct}%。分頁檔由系統管理，Windows 會自動加大它（上限最多約 %{limit}），但加大的瞬間仍可能有程式配置記憶體失敗。關閉用不到的程式最能降低認可記憶體。"
 
-history.title: "使用率歷史 · 最近 10 分鐘"
+history.title: "使用率歷史"
 history.physical: "實體記憶體"
 history.commit: "認可記憶體"
 history.critical: "警戒線"
 history.minutes: "%{n} 分"
+history.hours: "%{n} 小時"
+history.range_10m: "10 分鐘"
+history.range_1h: "1 小時"
+history.range_6h: "6 小時"
+history.peak_help: "1 小時與 6 小時以每分鐘的最高值繪製。歷史只在 memwarden 開著時累計，剛啟動時較長的範圍只有右側有資料。"
 
 top.title: "用量排行 · 私有記憶體"
 

@@ -12,9 +12,9 @@ repo 已公開於 https://github.com/yuuchilyann/memwarden ，CI 通過。
 
 **下一步**（依序）：
 
-1. M8 白天實機觀察：實際使用電腦的一天開著發佈版與外部記錄器（做法見第 7 節第 7 項），
-   看真正持續成長的程式與門檻數值；同時確認 memwarden 自身占用（第一次觀察 108 → 151 MB，
-   其中一次 +29 MB 原因未明，之後每小時約 +0.2–0.45 MB；介紹網頁前要處理）。
+1. memwarden 自身占用（介紹網頁前要處理，目標 160 MB，目前穩定在約 182 MB）：白天的持續增加已查明是外部
+   UI Automation 讀取（第 8 節），剩下螢幕鎖定時一次性約 +30 MB 待確認（PLAN.md 9.8）。
+   M8 已完成夜間與白天兩次觀察，門檻數值不需調整。
 2. 第一次 Release（做法見 3.1）：推送 `v0.1.0` 標籤，檢查草稿後由擁有者發佈。
 3. 其餘實機驗證：M6 Edge／多設定檔／memwarden 中途關閉（PLAN.md 7.10），
    M7 有視窗程式的關閉結果、記事本未存檔、以系統管理員執行的程式（PLAN.md 8.9）。
@@ -117,6 +117,7 @@ sampler 執行緒（每 2 秒）                       UI 執行緒（eframe）
 | `src/trim.rs` | 修剪長時間閒置程式的工作集，在背景執行緒進行並回報實際移出量（M5） |
 | `src/close.rs` | 關閉建議：判定建議關閉的程式、對其最上層視窗送 `WM_CLOSE`、追蹤結果（M7） |
 | `src/growth.rs` | 記憶體成長追蹤：每分鐘私有記憶體底線、重新啟動判定、持續成長判定（M8，唯讀） |
+| `src/history.rs` | 歷史圖資料：最近 10 分鐘每次取樣、6 小時內每分鐘的最高值；圖表範圍（10 分／1 小時／6 小時） |
 | `src/pagefile.rs` | 分頁檔設定與大小（唯讀）、系統管理時的最大值、開啟 Windows「效能選項」（M7） |
 | `src/audio.rs` | Core Audio：找出有作用中播放／錄音工作階段的程序（M5） |
 | `src/integration.rs` | 「瀏覽器整合」開關：寫入／刪除 host 資訊清單與 HKCU 的 Native Messaging 機碼（M6） |
@@ -192,7 +193,7 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 
 ## 7. 驗證方式
 
-1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告（目前 memwarden 47 項 + host 10 項），
+1. `cargo build` 和 `cargo test` 都必須沒有錯誤與警告（目前 memwarden 51 項 + host 10 項），
    `cargo clippy --all-targets -- -D warnings` 也要通過（CI 會檢查）。
    CI 上略過需要互動式桌面的 `closes_a_real_window`，所以 `close.rs` 的視窗測試只在本機執行。
    純邏輯：`classify.rs` 分類與 WebView2 歸屬、`activity.rs` 狀態轉換、`bridge.rs` 訊息處理、
@@ -236,6 +237,10 @@ eframe 必須維持 `default-features = false` 並啟用 `glow`；預設的 `wgp
 - UWP 應用程式的前景視窗屬於 `ApplicationFrameHost.exe`，前景偵測無法對應到實際的 UWP 程序；
   它們仍可由 CPU／I/O 判定活動。
 - 分類依賴 `classify.rs` 中的已知清單；不在清單內的安全軟體會被歸為一般應用程式。
+- 有程式透過 UI Automation 讀取 memwarden 的介面時（eframe 的 `accesskit`；例如輔助工具、會讀取其他視窗的 AI
+  或翻譯工具），memwarden 的私有記憶體會隨讀取次數增加（實測每 2 秒讀一次約 +3 MB／分），對方結束或釋放後歸還。
+  量測自身占用時要確認沒有這類程式（`Get-Process -Id <pid> -Module` 出現 `uiautomationcore.dll` 表示曾被讀取）。
+- 螢幕鎖定或顯示變化時，自身占用可能一次增加約 30 MB 且不歸還（疑為 OpenGL 驅動程式），待確認（PLAN.md 9.8）。
 - CJK 字型占自身記憶體約 30–60 MB（正黑體約 20 MB、Malgun Gothic 約 13 MB）。
 - 日文模式為了基線一致，Latin 文字也用 Yu Gothic 繪製。
 - 歷史圖例的排序由 egui_plot 依名稱決定，各語言順序不同。
